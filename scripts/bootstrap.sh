@@ -227,7 +227,21 @@ function init_product_repos() {
             cap_step "git init $(basename "$dir")"
             git -C "$dir" init -q -b main
             git -C "$dir" add -A
-            git -C "$dir" commit -q -m "Initial commit (stamped from znasllc-io/memql-project)"
+            # Author the scaffolding commit with the ambient git identity when
+            # one is configured; otherwise fall back to a stamped identity so
+            # the commit never fails on a machine (or a fresh CI runner) with no
+            # user.name/user.email set. A capability script must run identically
+            # everywhere -- it cannot depend on the caller's git config.
+            local msg="Initial commit (stamped from znasllc-io/memql-project)"
+            if git -C "$dir" config user.email >/dev/null 2>&1 \
+                && git -C "$dir" config user.name >/dev/null 2>&1; then
+                git -C "$dir" commit -q -m "$msg"
+            else
+                git -C "$dir" \
+                    -c "user.name=memql-project bootstrap" \
+                    -c "user.email=bootstrap@memql-project.local" \
+                    commit -q -m "$msg"
+            fi
             cap_changed
         fi
         if [[ "$CREATE_REPOS" == "github" ]]; then
