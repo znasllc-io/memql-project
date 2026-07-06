@@ -164,6 +164,15 @@ function stamp_payloads() {
             cap_warn "templates/$name not present yet -- skipping (see memql#2446/#2447)"
             continue
         fi
+        # Idempotent re-run: an already-stamped product repo is left as-is
+        # (matching clone_repo's behavior for the engine/cockpit checkouts), so
+        # re-running bootstrap on a set-up workspace is a no-op rather than a
+        # "stamp target already exists" failure. Remove the dir for a fresh stamp.
+        if [[ -d "$dst" ]]; then
+            cap_info "${PRODUCT}-${name}/ already stamped; leaving as-is"
+            stamped+=("$dst")
+            continue
+        fi
         stamp_tree "$src" "$dst"
         stamped+=("$dst")
     done
