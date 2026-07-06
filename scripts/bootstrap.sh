@@ -326,7 +326,7 @@ function main() {
     append_product_gitignore
     init_product_repos
 
-    cap_info "workspace stamped. Next: cd ${PRODUCT}-carrier && make up (once memql#2446 lands the carrier payload)"
+    cap_info "workspace stamped. Next: cd ${PRODUCT}-carrier && make up"
     emit_result
     cap_ok
 }
