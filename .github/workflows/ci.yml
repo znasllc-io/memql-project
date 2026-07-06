@@ -42,7 +42,9 @@ jobs:
         run: scripts/bootstrap.sh --help > /dev/null
       - name: no interactive prompts in scripts
         run: |
-          if grep -rnE 'read -p|^\s*select ' scripts/; then
+          # Match real code only -- comment lines (leading #) may legally
+          # MENTION read -p (capability.sh documents why it is banned).
+          if grep -rnE 'read -p|^[[:space:]]*select ' scripts/ | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#'; then
             echo "ERROR: interactive prompt found; capability scripts are non-interactive" >&2
             exit 1
           fi
