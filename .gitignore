@@ -20,13 +20,17 @@ profile.cov
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
-# Go workspace file
-go.work
+# go.work IS committed here -- this repo is the workspace root and the
+# carrier Dockerfile's `COPY go.work` depends on it existing. Only the
+# machine-local sum file stays untracked.
 go.work.sum
 
 # env file
 .env
 
-# Editor/IDE
-# .idea/
-# .vscode/
+# Sibling repo checkouts living inside the workspace root. Each is its own
+# git repository (cloned/scaffolded by scripts/bootstrap.sh), never tracked
+# by the workspace repo. bootstrap.sh appends the product-specific lines
+# (/<product>-carrier/, /<product>-client/) at stamp time.
+/memql/
+/memql-cockpit/
