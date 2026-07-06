@@ -10,8 +10,8 @@ set -euo pipefail
 #      as subdirectory checkouts (each its own git repo, ignored by the
 #      workspace repo),
 #   3. stamps the product carrier and client repos from templates/carrier
-#      and templates/client (token substitution; payloads land with
-#      memql#2446 / memql#2447 -- absence is reported, not fatal),
+#      and templates/client (token substitution; a missing payload is
+#      reported, not fatal),
 #   4. substitutes the __PRODUCT__ / __PRODUCT_ORG__ / __DOMAIN__ /
 #      __ENGINE_VERSION__ tokens across the workspace-root docs and
 #      regenerates go.work from the checkouts that exist,
@@ -153,15 +153,15 @@ function substitute_tokens_in_file() {
 }
 
 # stamp_payloads -- templates/carrier -> <product>-carrier/,
-# templates/client -> <product>-client/. Payload absence is reported,
-# not fatal (payloads land with memql#2446 / memql#2447).
+# templates/client -> <product>-client/. A missing payload is reported,
+# not fatal.
 function stamp_payloads() {
     local name stamped=()
     for name in "${TEMPLATE_DIRS[@]}"; do
         local src="$ROOT/templates/$name"
         local dst="$ROOT/${PRODUCT}-${name}"
         if [[ ! -d "$src" ]]; then
-            cap_warn "templates/$name not present yet -- skipping (see memql#2446/#2447)"
+            cap_warn "templates/$name not present -- skipping"
             continue
         fi
         # Idempotent re-run: an already-stamped product repo is left as-is

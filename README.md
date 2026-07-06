@@ -35,7 +35,8 @@ pattern: **a second product boots a full stack with zero engine-repo edits.**
 
    This clones the engine and cockpit, stamps the carrier and client repos
    from `templates/`, substitutes the tokens below across the workspace
-   docs, and regenerates `go.work`. Add `--create-repos=github` to also
+   docs, regenerates `go.work`, and (when the Go toolchain is present)
+   generates the carrier's `go.sum`. Add `--create-repos=github` to also
    create + push private GitHub repos for the stamped product repos.
 
    Alternatively run `memql-cockpit setup project` for the interactive
@@ -75,8 +76,8 @@ tolerance). The engine org (`znasllc-io`) stays literal.
 | `ONBOARDING.md` | the cross-repo developer guide the stamp personalizes |
 | `scripts/bootstrap.sh` | the stamper -- a capability script (JSON envelope on stdout, honest exit codes) |
 | `scripts/lib/capability.sh` | vendored capability-script runtime from the engine |
-| `templates/carrier/` | parameterized carrier repo payload (lands with memql#2446) |
-| `templates/client/` | parameterized client repo payload (lands with memql#2447) |
+| `templates/carrier/` | parameterized carrier repo payload (82 artifacts) |
+| `templates/client/` | parameterized client repo payload (full app shell) |
 
 Note on the shared local domain: two stamped products default to the same
 `__DOMAIN__` front-door hostnames, so run one local stack at a time or
