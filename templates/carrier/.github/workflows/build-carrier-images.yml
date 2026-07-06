@@ -1,0 +1,167 @@
+name: build-carrier-images
+
+# Build-speed C4 (memql epic znasllc-io/memql#1505, znasllc-io/memql#1509).
+# Builds + pushes the FIVE carrier images to ACR `acrmemql` on a release cut:
+#   memql-bff-__PRODUCT__, memql-cognition, memql-agent, memql-planner, memql-workbench
+# (the __PRODUCT__-DSL-carrying nodes, #1053). Moves the build off the operator
+# laptop onto native linux/amd64 CI.
+#
+# Cross-repo context: the carrier Dockerfile's build context spans BOTH
+# memql/ and memql-bff-__PRODUCT__/ as siblings (the `replace ../memql` directive
+# + RegisterTree). This workflow lives in the bff repo and checks out the
+# znasllc-io/memql sibling (PUBLIC -> the default GITHUB_TOKEN can read it; no
+# PAT). The carrier-base (#1507) is built ONCE in the `base` job, then the
+# matrix reuses it via CARRIER_BASE so the five carriers cost one base build +
+# five tag-only compiles.
+#
+# Auth: GitHub OIDC -> Azure. Federated subject
+# repo:__PRODUCT_ORG__/memql-bff-__PRODUCT__:ref:refs/heads/main -> runs on main
+# (workflow_dispatch). C6 (memql#1511) resolves each @sha256 from ACR by tag.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, used as the image tag (e.g. 0.1.0)."
+        required: true
+        type: string
+      engine_ref:
+        description: "znasllc-io/memql ref to build the carriers against (builtAgainstEngine)."
+        required: false
+        default: main
+        type: string
+      allow_overwrite:
+        description: "Re-push an existing tag (release tags are normally immutable)."
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  id-token: write # mint the OIDC token for azure/login
+  contents: read
+
+env:
+  ACR_NAME: acrmemql
+  ACR_LOGIN_SERVER: acrmemql.azurecr.io
+  CARRIER_BASE_REPO: memql-carrier-base
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Build the shared carrier base ONCE (#1507). The five carrier compiles below
+  # reuse it via CARRIER_BASE, so the expensive prefix runs a single time.
+  # --------------------------------------------------------------------------
+  base:
+    name: build carrier base
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout bff (workspace/memql-bff-__PRODUCT__)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          path: workspace/memql-bff-__PRODUCT__
+      - name: Checkout memql sibling (workspace/memql)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: znasllc-io/memql
+          ref: ${{ inputs.engine_ref }}
+          path: workspace/memql
+      - name: Assemble workspace (go.work + .dockerignore)
+        run: bash workspace/memql-bff-__PRODUCT__/.github/scripts/assemble-carrier-workspace.sh workspace
+
+      - name: Azure login (OIDC)
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: ACR login
+        run: az acr login --name "$ACR_NAME"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v3
+      - name: Build + push carrier base
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v6
+        with:
+          context: workspace
+          file: workspace/memql-bff-__PRODUCT__/Dockerfile
+          target: carrier-base
+          push: true
+          platforms: linux/amd64
+          provenance: false
+          tags: ${{ env.ACR_LOGIN_SERVER }}/${{ env.CARRIER_BASE_REPO }}:${{ inputs.version }}
+          cache-from: type=gha,scope=carrier-base
+          cache-to: type=gha,mode=max,scope=carrier-base
+
+  # --------------------------------------------------------------------------
+  # Five tag-only carrier compiles, each FROM the pushed base.
+  # --------------------------------------------------------------------------
+  carriers:
+    name: build ${{ matrix.image }}
+    needs: base
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { tag: bff, image: memql-bff-__PRODUCT__ }
+          - { tag: cognition, image: memql-cognition }
+          - { tag: agent, image: memql-agent }
+          - { tag: planner, image: memql-planner }
+          - { tag: workbench, image: memql-workbench }
+    steps:
+      - name: Checkout bff (workspace/memql-bff-__PRODUCT__)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          path: workspace/memql-bff-__PRODUCT__
+      - name: Checkout memql sibling (workspace/memql)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: znasllc-io/memql
+          ref: ${{ inputs.engine_ref }}
+          path: workspace/memql
+      - name: Assemble workspace (go.work + .dockerignore)
+        run: bash workspace/memql-bff-__PRODUCT__/.github/scripts/assemble-carrier-workspace.sh workspace
+
+      - name: Azure login (OIDC)
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: ACR login
+        run: az acr login --name "$ACR_NAME"
+
+      - name: Immutability guard
+        if: ${{ !inputs.allow_overwrite }}
+        run: |
+          img="${{ matrix.image }}:${{ inputs.version }}"
+          if az acr repository show --name "$ACR_NAME" --image "$img" >/dev/null 2>&1; then
+            echo "::error::${img} already exists in ${ACR_NAME} -- release tags are immutable. Bump version or re-run with allow_overwrite=true." >&2
+            exit 1
+          fi
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v3
+      - name: Build + push ${{ matrix.image }}
+        id: build
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v6
+        with:
+          context: workspace
+          file: workspace/memql-bff-__PRODUCT__/Dockerfile
+          push: true
+          platforms: linux/amd64
+          provenance: false
+          build-args: |
+            BUILD_TAGS=${{ matrix.tag }}
+            CARRIER_BASE=${{ env.ACR_LOGIN_SERVER }}/${{ env.CARRIER_BASE_REPO }}:${{ inputs.version }}
+          tags: ${{ env.ACR_LOGIN_SERVER }}/${{ matrix.image }}:${{ inputs.version }}
+          cache-from: type=gha,scope=carrier-${{ matrix.tag }}
+          cache-to: type=gha,mode=max,scope=carrier-${{ matrix.tag }}
+
+      - name: Digest summary
+        run: |
+          {
+            echo "### ${{ matrix.image }}:${{ inputs.version }} (BUILD_TAGS=${{ matrix.tag }})"
+            echo '```'
+            echo "${ACR_LOGIN_SERVER}/${{ matrix.image }}@${{ steps.build.outputs.digest }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

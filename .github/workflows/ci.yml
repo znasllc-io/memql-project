@@ -114,9 +114,102 @@ jobs:
             --domain=demo.local --engine-version=main --shallow \
             | jq -e '.ok == true' > /dev/null
 
+  carrier-payload:
+    name: carrier-payload
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.26.4'
+          cache: false
+      - name: install kubeconform
+        run: |
+          curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
+            | tar -xz -C /usr/local/bin kubeconform
+          kubeconform -v
+
+      # --- stamp the workspace (clones engine + cockpit siblings, stamps
+      #     __PRODUCT__-carrier). templates/client is absent until memql#2447,
+      #     so only the carrier is produced. ---
+      - name: stamp demo workspace
+        run: |
+          stamp_dir="$(mktemp -d)"
+          rsync -a --exclude .git ./ "$stamp_dir/"
+          cd "$stamp_dir"
+          scripts/bootstrap.sh --product=demo --product-org=demo-org \
+            --domain=demo.local --engine-version=main --shallow \
+            | jq -e '.ok == true and (.result.stampedRepos | index("demo-carrier"))' > /dev/null
+          echo "STAMP_DIR=$stamp_dir" >> "$GITHUB_ENV"
+
+      - name: no leftover tokens in the stamped carrier
+        run: |
+          cd "$STAMP_DIR/demo-carrier"
+          if grep -rn '__PRODUCT__\|__PRODUCT_ORG__\|__DOMAIN__\|__ENGINE_VERSION__' . ; then
+            echo "ERROR: unsubstituted template token in the stamped carrier" >&2
+            exit 1
+          fi
+
+      - name: no copresent/visionarys leakage in the stamped carrier
+        run: |
+          cd "$STAMP_DIR/demo-carrier"
+          # Zero-tolerance neutrality guard (case-insensitive), mirroring the
+          # engine's own product-neutrality gate.
+          if grep -rniE 'copresent|visionarys' . ; then
+            echo "ERROR: source-product name leaked into the stamped carrier" >&2
+            exit 1
+          fi
+
+      - name: golden stamp determinism (stamp twice, diff the carrier)
+        run: |
+          stamp_dir2="$(mktemp -d)"
+          rsync -a --exclude .git ./ "$stamp_dir2/"
+          cd "$stamp_dir2"
+          # Reuse the first run's engine/cockpit clones as local sources so the
+          # determinism pass needs no second network fetch.
+          scripts/bootstrap.sh --product=demo --product-org=demo-org \
+            --domain=demo.local --engine-version=main --shallow \
+            --engine-repo="$STAMP_DIR/memql" --cockpit-repo="$STAMP_DIR/memql-cockpit" \
+            | jq -e '.ok == true' > /dev/null
+          # Compare the stamped carrier trees only (exclude the sibling clones +
+          # each carrier's own fresh .git).
+          diff -r --exclude=.git "$STAMP_DIR/demo-carrier" "$stamp_dir2/demo-carrier"
+          echo "OK: stamp is deterministic"
+
+      - name: go build + vet + test the stamped carrier (against the engine sibling)
+        run: |
+          cd "$STAMP_DIR/demo-carrier"
+          go mod tidy
+          go build ./...
+          go vet ./...
+          # `go test` runs the carrier's own dslimports.Load test
+          # (dsl/demo/load_test.go) + the import-surface smoke test.
+          go test ./...
+
+      - name: kustomize renders all three overlays
+        run: |
+          cd "$STAMP_DIR/demo-carrier"
+          for env in local staging prod; do
+            echo "--- kustomize $env ---"
+            kubectl kustomize "deploy/k8s/overlays/$env" > "/tmp/render-$env.yaml"
+            grep -q '^kind:' "/tmp/render-$env.yaml"
+          done
+
+      - name: kubeconform the ArgoCD manifests
+        run: |
+          cd "$STAMP_DIR/demo-carrier"
+          # AppProject/Application are argoproj CRDs; skip missing schemas.
+          kubeconform -strict -ignore-missing-schemas \
+            deploy/argocd/project.yaml deploy/argocd/apps/*.yaml
+
+      - name: Makefile smoke (make -n up dev status)
+        run: |
+          cd "$STAMP_DIR/demo-carrier"
+          make -n up dev status > /dev/null
+
   ci-required:
     name: ci-required
-    needs: [shellcheck, capability-conformance, stamp-smoke]
+    needs: [shellcheck, capability-conformance, stamp-smoke, carrier-payload]
     if: always()
     runs-on: ubuntu-latest
     steps:

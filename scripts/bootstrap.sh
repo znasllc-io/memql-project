@@ -122,8 +122,14 @@ function stamp_tree() {
         local out
         out="$dst/$(substitute_tokens_in_string "$rel")"
         substitute_tokens_in_file "$src/$rel" "$out"
-        # Preserve the executable bit (scripts in the payload).
-        [[ -x "$src/$rel" ]] && chmod +x "$out"
+        # Preserve the executable bit (scripts in the payload). Use an `if`
+        # rather than `[[ -x ]] && chmod`: the latter, as the loop body's last
+        # statement, leaves the loop (and its `find | while` pipeline) with a
+        # non-zero exit status whenever the FINAL file is non-executable -- which
+        # trips `set -e` and aborts the stamp. An if-block always exits 0.
+        if [[ -x "$src/$rel" ]]; then
+            chmod +x "$out"
+        fi
     done
     cap_changed
 }

@@ -1,0 +1,168 @@
+name: cluster-e2e
+
+# DECOUPLING P3: MOVED from the engine repo; SUPERSEDES
+# znasllc-io/memql/.github/workflows/cluster-e2e.yml. Now that this pack owns the
+# release lockfiles (releases/), the resilient-mesh parity gate fires from HERE
+# when a pack release lockfile lands on main.
+#
+# INVERTED CHECKOUT vs the engine original: the engine copy checked out memql
+# (self) + memql-bff-__PRODUCT__ (private sibling, token-gated). This copy checks
+# out memql-bff-__PRODUCT__ (SELF, default token) + memql (the PUBLIC engine
+# sibling, no token). The harness itself (make up / make dev / cluster-e2e.sh)
+# lives in the ENGINE repo, so every build/gate step runs from
+# `working-directory: memql`; the carrier bff image builds from THIS pack sitting
+# next to it at ../memql-bff-__PRODUCT__ (the layout the engine's make-dev carrier
+# hook + the carrier Dockerfile's `replace ../memql` both assume).
+#
+# ---------------------------------------------------------------------------
+# Resilient-mesh parity gate (epic znasllc-io/memql#1259 Phase 4, #1273).
+#
+# Boots the 2-replica STAGING-PARITY cluster on k3d + ArgoCD -- the SAME
+# deploy/k8s overlays + ArgoCD reconciliation path staging runs (Epic 0, Argo
+# parity #2061) -- and runs the cross-replica delivery gate
+# (`make cluster-e2e` -> scripts/test/cluster-e2e.sh -> test/clustere2e). The
+# gate asserts the #1259 delivery invariant: an utterance produced on one bff
+# replica reaches a subscriber anchored on EVERY bff replica, exactly once.
+#
+# OWNER PREREQUISITE -- SECRETS (the job SKIPS cleanly without them)
+# -----------------------------------------------------------------
+# The GATE subset is postgres + identity + bff. identity is an ENGINE image
+# (built from the engine sibling) and bff is a CARRIER image built from THIS
+# pack. Both repos check out without MEMQL_PACKAGES_TOKEN now (pack = self via
+# the default token, engine = public), but the carrier build still needs
+# `read:packages`, and keeping the guard preserves the engine's skip-clean
+# behaviour + the same secret name:
+#   * MEMQL_PACKAGES_TOKEN -- a classic PAT with `read:packages` (SSO-authorized
+#     for the org) for the carrier image build. Provision it in THIS repo's
+#     Actions secrets to enable the gate.
+# The `gate` job is guarded on `secrets.MEMQL_PACKAGES_TOKEN != ''`, so until the
+# owner provisions it the gate NO-OPS (a visible skip) and never spuriously
+# blocks.
+
+on:
+  # DEPLOY trigger: a release lockfile landing on main is the staging-deploy
+  # event. The parity gate is the green-before-staging-deploy check for it.
+  push:
+    branches: [main]
+    paths:
+      - 'releases/**'
+  # On-demand: re-run the gate against main without cutting a release.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One parity boot at a time -- the k3d cluster binds fixed host ports; serialize
+# so two runs can't fight over them. Never cancel an in-flight gate.
+concurrency:
+  group: cluster-e2e
+  cancel-in-progress: false
+
+jobs:
+  # Guard: surface whether the owner secret exists (secrets can't be read in a
+  # job-level `if:` that gates the whole matrix cleanly without a step, so we
+  # expose it as an output the gate job keys off).
+  secrets-present:
+    name: secrets present?
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - id: check
+        env:
+          PACKAGES_TOKEN: ${{ secrets.MEMQL_PACKAGES_TOKEN }}
+        run: |
+          if [ -n "$PACKAGES_TOKEN" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "INFO: owner secret present -- the parity gate will run."
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "WARNING: MEMQL_PACKAGES_TOKEN is unset."
+            echo "WARNING: skipping the parity gate (owner prerequisite not met)."
+          fi
+
+  gate:
+    name: cross-replica delivery parity gate
+    needs: secrets-present
+    if: ${{ needs.secrets-present.outputs.ready == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      MEMQL_PACKAGES_TOKEN: ${{ secrets.MEMQL_PACKAGES_TOKEN }}
+      # The local overlay ArgoCD reconciles lives in the ENGINE repo, so pin the
+      # Application to the engine's default branch (which ArgoCD always has).
+      # NOT github.sha -- that is THIS pack's sha and the engine repo does not
+      # have it.
+      MEMQL_K3D_TARGET_REVISION: main
+    steps:
+      # SELF (this pack) -- the carrier (bff) image builds from here. It must sit
+      # NEXT TO memql in the workspace (../memql-bff-__PRODUCT__), mirroring the
+      # carrier Dockerfile's `replace ../memql` directive.
+      - name: checkout memql-bff-__PRODUCT__ (self)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          path: memql-bff-__PRODUCT__
+
+      # ENGINE sibling (public) -- carries the k3d/ArgoCD harness (make up / make
+      # dev / scripts/test/cluster-e2e.sh) and the identity engine image.
+      - name: checkout memql (engine sibling)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: znasllc-io/memql
+          path: memql
+
+      - name: setup go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: memql/go.mod
+          cache: false
+
+      - name: install k3d + kubectl
+        env:
+          K3D_VERSION: v5.7.4
+          KUBECTL_VERSION: v1.31.1
+        run: |
+          set -euo pipefail
+          curl -fsSLo /tmp/k3d \
+            "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-amd64"
+          sudo install -m 0755 /tmp/k3d /usr/local/bin/k3d
+          curl -fsSLo /tmp/kubectl \
+            "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          sudo install -m 0755 /tmp/kubectl /usr/local/bin/kubectl
+          k3d version
+          kubectl version --client
+
+      # Bootstrap the k3d cluster + ArgoCD + the engine local overlay (Application
+      # pinned to the engine's main, which ArgoCD fetches from GitHub).
+      - name: bootstrap k3d + ArgoCD (make up)
+        working-directory: memql
+        run: make up
+
+      # Build the GATE-subset images (identity = engine, bff = carrier built from
+      # the ../memql-bff-__PRODUCT__ sibling) + infra images, import into k3d.
+      - name: build + import gate-subset images (make dev)
+        working-directory: memql
+        run: make dev NODE=identity,bff PULL_INFRA=1 NO_WAIT=1
+
+      # Scale to 2 replicas, wait for ArgoCD sync + readiness, seed a user JWT,
+      # and run the cross-replica delivery gate against the cluster this job booted.
+      - name: scale + seed + delivery gate
+        working-directory: memql
+        run: bash scripts/test/cluster-e2e.sh --no-build
+
+      - name: cluster diagnostics on failure
+        if: ${{ failure() }}
+        working-directory: memql
+        run: |
+          kubectl get pods -n memql -o wide || true
+          kubectl get application memql-local -n argocd \
+            -o custom-columns=SYNC:.status.sync.status,HEALTH:.status.health.status || true
+          for d in identity bff postgres; do
+            echo "=== logs: $d ==="
+            kubectl logs -n memql "deploy/$d" --tail=200 --all-containers || true
+          done
+
+      - name: tear down the cluster
+        if: ${{ always() }}
+        working-directory: memql
+        run: make down || true

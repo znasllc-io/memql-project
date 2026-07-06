@@ -1,0 +1,45 @@
+name: __PRODUCT__-sdk-driftcheck
+
+# Regenerates @__PRODUCT_ORG__/__PRODUCT__-sdk from `core DSL + dsl/__PRODUCT__`
+# and fails on drift. The generator needs the memql core DSL, so it checks
+# out the memql repo alongside this one and links them with a go.work,
+# mirroring local development.
+#
+# znasllc-io/memql is PUBLIC, so the sibling checkout needs no token and
+# the drift check ALWAYS runs (memql-bff-__PRODUCT__#154 -- it previously
+# passed-by-skipping behind an unset MEMQL_CORE_RO_TOKEN, which let the
+# committed SDK rot against engine-core churn undetected).
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  driftcheck:
+    name: sdk-gen-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout __PRODUCT__ BFF
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          path: memql-bff-__PRODUCT__
+      - name: checkout memql core
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: znasllc-io/memql
+          path: memql
+      - name: setup go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.26.4'
+          cache: true
+          cache-dependency-path: memql-bff-__PRODUCT__/go.sum
+      - name: link modules via go.work
+        run: go work init ./memql ./memql-bff-__PRODUCT__
+      - name: drift check
+        working-directory: memql-bff-__PRODUCT__
+        run: make sdk-gen-check
