@@ -1,0 +1,125 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  # Merge queue: required checks must report on the queue's merge candidate.
+  merge_group:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# BRANCH-PROTECTION SAFETY: the single required check from this workflow is
+# the `ci-required` aggregator at the bottom (plus `scan` from gitleaks.yml).
+# Individual jobs must NOT be required checks.
+jobs:
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: shellcheck scripts
+        run: |
+          shellcheck --version
+          find scripts -name '*.sh' -print0 | xargs -0 shellcheck --severity=warning
+
+  capability-conformance:
+    name: capability-conformance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: bash syntax
+        run: find scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n
+      - name: print-spec emits valid JSON
+        run: scripts/bootstrap.sh --print-spec | jq -e '.capability == "project.bootstrap" and (.params | length) >= 8'
+      - name: help exits 0
+        run: scripts/bootstrap.sh --help > /dev/null
+      - name: no interactive prompts in scripts
+        run: |
+          if grep -rnE 'read -p|^\s*select ' scripts/; then
+            echo "ERROR: interactive prompt found; capability scripts are non-interactive" >&2
+            exit 1
+          fi
+      - name: missing required param exits 2 with failure envelope
+        run: |
+          set +e
+          out="$(scripts/bootstrap.sh --product-org=demo-org 2>/dev/null)"
+          code=$?
+          set -e
+          [ "$code" -eq 2 ] || { echo "expected exit 2, got $code" >&2; exit 1; }
+          echo "$out" | jq -e '.ok == false and .error.code == 2' > /dev/null
+      - name: invalid enum exits 2
+        run: |
+          set +e
+          scripts/bootstrap.sh --product=demo --product-org=demo-org --create-repos=bogus > /dev/null 2>&1
+          code=$?
+          set -e
+          [ "$code" -eq 2 ] || { echo "expected exit 2, got $code" >&2; exit 1; }
+      - name: dry-run emits success envelope without changing anything
+        run: |
+          before="$(git status --porcelain)"
+          scripts/bootstrap.sh --product=demo --product-org=demo-org --dry-run \
+            | jq -e '.ok == true and .result.dryRun == true and .changed == false' > /dev/null
+          after="$(git status --porcelain)"
+          [ "$before" = "$after" ] || { echo "dry-run mutated the tree" >&2; exit 1; }
+
+  stamp-smoke:
+    name: stamp-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.26.4'
+          cache: true
+      - name: stamp into a temp workspace
+        run: |
+          stamp_dir="$(mktemp -d)"
+          rsync -a --exclude .git ./ "$stamp_dir/"
+          cd "$stamp_dir"
+          scripts/bootstrap.sh --product=demo --product-org=demo-org \
+            --domain=demo.local --engine-version=main --shallow \
+            | tee /tmp/stamp-envelope.json
+          jq -e '.ok == true and .changed == true and .result.product == "demo"' /tmp/stamp-envelope.json > /dev/null
+          echo "STAMP_DIR=$stamp_dir" >> "$GITHUB_ENV"
+      - name: stamped tree assertions
+        run: |
+          cd "$STAMP_DIR"
+          test -d memql/.git
+          test -d memql-cockpit/.git
+          test -f go.work
+          # Zero token tolerance in generated/substituted files.
+          if grep -rn '__PRODUCT__\|__PRODUCT_ORG__\|__DOMAIN__\|__ENGINE_VERSION__' \
+              go.work README.md ONBOARDING.md .gitignore; then
+            echo "ERROR: unsubstituted template token in stamped workspace files" >&2
+            exit 1
+          fi
+          grep -q './memql' go.work
+          grep -qxF '/demo-carrier/' .gitignore
+          grep -qxF '/demo-client/' .gitignore
+      - name: go.work is syntactically valid
+        run: cd "$STAMP_DIR" && go work edit -json > /dev/null
+      - name: stamp is idempotent for existing checkouts
+        run: |
+          cd "$STAMP_DIR"
+          scripts/bootstrap.sh --product=demo --product-org=demo-org \
+            --domain=demo.local --engine-version=main --shallow \
+            | jq -e '.ok == true' > /dev/null
+
+  ci-required:
+    name: ci-required
+    needs: [shellcheck, capability-conformance, stamp-smoke]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: all lanes green
+        run: |
+          results='${{ toJSON(needs) }}'
+          echo "$results" | jq -e 'to_entries | all(.value.result == "success")' > /dev/null \
+            || { echo "a required lane failed or was cancelled" >&2; exit 1; }
