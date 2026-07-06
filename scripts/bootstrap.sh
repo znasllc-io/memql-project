@@ -213,6 +213,28 @@ function regenerate_go_work() {
     cap_changed
 }
 
+# generate_carrier_gosum -- a freshly stamped carrier ships no go.sum
+# (dependency hashes resolve at stamp time against the cloned engine
+# sibling), but the carrier Dockerfile COPYs it and the first CI build
+# expects it committed. Generate it at stamp time when the Go toolchain
+# is available so the initial commit is complete; otherwise warn -- the
+# first local `go build` generates it and it should be committed then.
+function generate_carrier_gosum() {
+    local carrier="$ROOT/${PRODUCT}-carrier"
+    [[ -d "$carrier" ]] || return 0
+    [[ -f "$carrier/go.sum" ]] && return 0
+    if command -v go >/dev/null 2>&1; then
+        cap_step "go mod tidy (generate ${PRODUCT}-carrier/go.sum)"
+        if (cd "$carrier" && go mod tidy >/dev/null 2>&1); then
+            cap_changed
+        else
+            cap_warn "go mod tidy failed in ${PRODUCT}-carrier; run it manually and commit go.sum"
+        fi
+    else
+        cap_warn "Go toolchain not found; run 'go mod tidy' in ${PRODUCT}-carrier and commit go.sum before the first docker build"
+    fi
+}
+
 # append_product_gitignore -- the stamped product repos are sibling git
 # repos inside the workspace root; the workspace repo must ignore them.
 function append_product_gitignore() {
@@ -323,6 +345,7 @@ function main() {
     stamp_payloads
     stamp_root_docs
     regenerate_go_work
+    generate_carrier_gosum
     append_product_gitignore
     init_product_repos
 

@@ -36,6 +36,8 @@ jobs:
             --domain=demo.local --engine-version=main --shallow \
             | jq -e '.ok == true' > /dev/null
           echo "STAMP_DIR=$stamp_dir" >> "$GITHUB_ENV"
+      - name: go mod tidy in the stamped carrier (generates go.sum for the Dockerfile COPY)
+        run: cd "$STAMP_DIR/demo-carrier" && go mod tidy
       - name: build the carrier-base stage (workspace-parent context)
         run: |
           cd "$STAMP_DIR"
