@@ -130,8 +130,7 @@ jobs:
           kubeconform -v
 
       # --- stamp the workspace (clones engine + cockpit siblings, stamps
-      #     __PRODUCT__-carrier). templates/client is absent until memql#2447,
-      #     so only the carrier is produced. ---
+      #     __PRODUCT__-carrier + __PRODUCT__-client). ---
       - name: stamp demo workspace
         run: |
           stamp_dir="$(mktemp -d)"
@@ -207,9 +206,60 @@ jobs:
           cd "$STAMP_DIR/demo-carrier"
           make -n up dev status > /dev/null
 
+  client-payload:
+    name: client-payload
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4
+        with:
+          node-version: '20'
+
+      # Stamp the workspace (clones engine + cockpit siblings, stamps
+      # __PRODUCT__-carrier + __PRODUCT__-client).
+      - name: stamp demo workspace
+        run: |
+          stamp_dir="$(mktemp -d)"
+          rsync -a --exclude .git ./ "$stamp_dir/"
+          cd "$stamp_dir"
+          scripts/bootstrap.sh --product=demo --product-org=demo-org \
+            --domain=demo.local --engine-version=main --shallow \
+            | jq -e '.ok == true and (.result.stampedRepos | index("demo-client"))' > /dev/null
+          echo "STAMP_DIR=$stamp_dir" >> "$GITHUB_ENV"
+
+      - name: no leftover tokens in the stamped client
+        run: |
+          cd "$STAMP_DIR/demo-client"
+          if grep -rn '__PRODUCT__\|__PRODUCT_ORG__\|__DOMAIN__\|__ENGINE_VERSION__' .; then
+            echo "ERROR: unsubstituted template token in the stamped client" >&2
+            exit 1
+          fi
+
+      - name: no copresent/visionarys leakage in the stamped client
+        run: |
+          cd "$STAMP_DIR/demo-client"
+          if grep -rniE 'copresent|visionarys' .; then
+            echo "ERROR: source-product name leaked into the stamped client" >&2
+            exit 1
+          fi
+
+      # The starter shell is SELF-CONTAINED (a thin local memQL client + a local
+      # generated concepts module in the sdk-gen A3 shape), so it depends on zero
+      # GitHub Packages / private SDKs: `npm install` needs NO NODE_AUTH_TOKEN and
+      # the full typecheck + build + lint run unconditionally. A product wiring
+      # the published @__PRODUCT_ORG__/__PRODUCT__-sdk later reintroduces the token
+      # (see the stamped client's README 'SDK resolution').
+      - name: npm install + typecheck + build + lint
+        working-directory: ${{ env.STAMP_DIR }}/demo-client
+        run: |
+          npm install --no-audit --no-fund
+          npm run typecheck
+          npm run build
+          npm run lint
+
   ci-required:
     name: ci-required
-    needs: [shellcheck, capability-conformance, stamp-smoke, carrier-payload]
+    needs: [shellcheck, capability-conformance, stamp-smoke, carrier-payload, client-payload]
     if: always()
     runs-on: ubuntu-latest
     steps:
