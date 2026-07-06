@@ -1,0 +1,26 @@
+// automations.memql -- the __PRODUCT__ product pack (starter).
+//
+// One event-driven automation that reacts to a lifecycle event and calls the
+// pack's own builtin -- exercising the pack's Go capability from the automation
+// path. It hooks the pack's OWN greeting concept so the starter tree is
+// self-contained (it resolves under dslimports.Load without any core namespace
+// present). A real pack typically hooks a CORE service event instead
+// (@trigger(event="node.created", concept="v1:<core>:<concept>", ...)) to react
+// to the engine's own rows -- the core has no knowledge of the pack.
+//
+// The event payload binds to the automation's typed args { } contract:
+// ownerUserId is the owner stamped on the created row, read as a bare field.
+
+use __PRODUCT__.builtins.{ composeGreeting }
+
+@enabled
+@trigger(event="node.created", concept="v1:__PRODUCT__:greeting", partition="*")
+@description("On creation of a greeting, compose a greeting for its owner via the pack's integration capability. Demonstrates a pack automation firing a Go-backed builtin on a graph event.")
+automation greetOnGreetingCreate {
+  args {
+    ownerUserId any @description("The owner the greeting targets, bound from the created row's payload (typed args contract).")
+  }
+  step greet {
+    builtin composeGreeting ( userName: ownerUserId )
+  }
+}

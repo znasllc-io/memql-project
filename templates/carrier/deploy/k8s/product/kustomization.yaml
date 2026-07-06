@@ -1,0 +1,11 @@
+# Kustomize base for the __PRODUCT__ product manifests the full-stack
+# staging/prod overlays compose on top of the remote engine base. A directory
+# base (not file refs) is the sanctioned form: kustomize's load restrictor
+# forbids an overlay from referencing a FILE above its own root
+# (../../product/bff.yaml), so ../../product carries this kustomization.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - bff.yaml
+  - __PRODUCT__.yaml
+  - public-entry.yaml

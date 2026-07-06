@@ -1,0 +1,30 @@
+# The __PRODUCT__ product PROD Application, owned by this repo. Starter
+# placeholder kept coherent with staging: when a prod cluster is stood up,
+# register it and point this Application's destination at its API server.
+# Manual-sync first; promote to automated after verifying the render.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: __PRODUCT__-prod
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: __PRODUCT__
+  source:
+    repoURL: https://github.com/__PRODUCT_ORG__/__PRODUCT__-carrier.git
+    targetRevision: main
+    path: deploy/k8s/overlays/prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: memql
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=false
+      - RespectIgnoreDifferences=true
+      - ApplyOutOfSyncOnly=true
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas

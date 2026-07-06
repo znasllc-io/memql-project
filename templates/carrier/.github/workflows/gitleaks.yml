@@ -1,0 +1,35 @@
+name: gitleaks
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Installs the gitleaks binary directly from go install rather than using
+# `gitleaks/gitleaks-action`, whose v2 release requires a paid license for
+# any private repo in an org. The CLI is free everywhere; we use the same
+# workflow shape across memql, memql-cockpit, and memql-bff-__PRODUCT__ for
+# consistency.
+
+jobs:
+  scan:
+    name: scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0  # full history required for `gitleaks git .`
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.26.4'
+          cache: true
+      - name: install gitleaks
+        # The GitHub org moved to gitleaks/gitleaks but the Go module path
+        # is still the original zricethezav/gitleaks namespace.
+        run: go install github.com/zricethezav/gitleaks/v8@v8.30.1
+      - name: scan
+        run: gitleaks git . --no-banner

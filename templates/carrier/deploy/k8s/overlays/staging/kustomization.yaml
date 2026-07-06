@@ -1,0 +1,65 @@
+# Full-stack STAGING overlay for the __PRODUCT__ product, owned by this repo. It
+# composes the memQL engine base REMOTELY (from the public engine repo, pinned
+# to __ENGINE_VERSION__) and layers the product manifests (../../product) +
+# digest-pinned images + the product's identity client config on top. This is
+# the path an ArgoCD Application (deploy/argocd/apps/__PRODUCT__-staging.yaml)
+# reconciles.
+#
+# Directory base (not file refs) for ../../product: kustomize's load restrictor
+# forbids referencing a file above the overlay root; deploy/k8s/product carries
+# its own kustomization listing bff.yaml + __PRODUCT__.yaml + public-entry.yaml.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: memql
+
+# Reapply the engine base's part-of label at the overlay level so the product
+# manifests (public-entry.yaml's ClusterIssuer + Ingresses carry no inline
+# part-of label) don't silently drop it. Idempotent on already-labeled resources.
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: memql
+    includeSelectors: false
+
+resources:
+  # The engine mesh base from the PUBLIC engine repo, pinned to the engine
+  # version this product ships against. Bump __ENGINE_VERSION__ to roll the
+  # engine mesh; the base no longer ships bff/SPA/public-entry (those moved to
+  # the product overlay in the engine decouple), so composing it with
+  # ../../product below carries no duplicate resource ids.
+  - https://github.com/znasllc-io/memql//deploy/k8s/base?ref=__ENGINE_VERSION__
+  # The product head (bff), SPA, and public HTTPS entry.
+  - ../../product
+
+patches:
+  # Register the product SPA's OAuth client on the identity Deployment (base
+  # carries only the product-neutral cockpit client).
+  - path: patches/identity-product-config.yaml
+    target:
+      kind: Deployment
+      name: identity
+  # HOSTNAME RESTORE (product-owner step before first boot): the engine base
+  # neutralizes issuer/JWKS hostnames to example.com placeholders and fails
+  # LOUDLY at boot until a product restores them. Add per-node env patches here
+  # (identity issuer/JWKS -> https://identity.__DOMAIN__, voice/mcp livekit +
+  # issuer, etc.) once you stand up staging for real. Omitted from the starter
+  # so this overlay renders against any engine base layout; kustomize render
+  # (this CI gate) does not require them, but a live boot does.
+
+images:
+  # Product images -- the carrier bff (engine + __PRODUCT__ pack) and the SPA.
+  # Replace the placeholder digests at release time with the digests the build
+  # server produced (see scripts/release/). All-zeros only keeps the digest-pin
+  # gate green; it fails closed if ever reconciled.
+  - name: acrmemql.azurecr.io/memql-bff-__PRODUCT__
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  - name: acrmemql.azurecr.io/__PRODUCT__
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  # Engine mesh images -- pinned by tag to the engine version this product ships.
+  - { name: acrmemql.azurecr.io/memql-identity, newTag: "__ENGINE_VERSION__" }
+  - { name: acrmemql.azurecr.io/memql-cognition, newTag: "__ENGINE_VERSION__" }
+  - { name: acrmemql.azurecr.io/memql-voice, newTag: "__ENGINE_VERSION__" }
+  - { name: acrmemql.azurecr.io/memql-agent, newTag: "__ENGINE_VERSION__" }
+  - { name: acrmemql.azurecr.io/memql-planner, newTag: "__ENGINE_VERSION__" }
+  - { name: acrmemql.azurecr.io/memql-workbench, newTag: "__ENGINE_VERSION__" }
+  - { name: acrmemql.azurecr.io/memql-mcp, newTag: "__ENGINE_VERSION__" }

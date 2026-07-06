@@ -122,8 +122,14 @@ function stamp_tree() {
         local out
         out="$dst/$(substitute_tokens_in_string "$rel")"
         substitute_tokens_in_file "$src/$rel" "$out"
-        # Preserve the executable bit (scripts in the payload).
-        [[ -x "$src/$rel" ]] && chmod +x "$out"
+        # Preserve the executable bit (scripts in the payload). Use an `if`
+        # rather than `[[ -x ]] && chmod`: the latter, as the loop body's last
+        # statement, leaves the loop (and its `find | while` pipeline) with a
+        # non-zero exit status whenever the FINAL file is non-executable -- which
+        # trips `set -e` and aborts the stamp. An if-block always exits 0.
+        if [[ -x "$src/$rel" ]]; then
+            chmod +x "$out"
+        fi
     done
     cap_changed
 }
@@ -156,6 +162,15 @@ function stamp_payloads() {
         local dst="$ROOT/${PRODUCT}-${name}"
         if [[ ! -d "$src" ]]; then
             cap_warn "templates/$name not present yet -- skipping (see memql#2446/#2447)"
+            continue
+        fi
+        # Idempotent re-run: an already-stamped product repo is left as-is
+        # (matching clone_repo's behavior for the engine/cockpit checkouts), so
+        # re-running bootstrap on a set-up workspace is a no-op rather than a
+        # "stamp target already exists" failure. Remove the dir for a fresh stamp.
+        if [[ -d "$dst" ]]; then
+            cap_info "${PRODUCT}-${name}/ already stamped; leaving as-is"
+            stamped+=("$dst")
             continue
         fi
         stamp_tree "$src" "$dst"
@@ -221,7 +236,21 @@ function init_product_repos() {
             cap_step "git init $(basename "$dir")"
             git -C "$dir" init -q -b main
             git -C "$dir" add -A
-            git -C "$dir" commit -q -m "Initial commit (stamped from znasllc-io/memql-project)"
+            # Author the scaffolding commit with the ambient git identity when
+            # one is configured; otherwise fall back to a stamped identity so
+            # the commit never fails on a machine (or a fresh CI runner) with no
+            # user.name/user.email set. A capability script must run identically
+            # everywhere -- it cannot depend on the caller's git config.
+            local msg="Initial commit (stamped from znasllc-io/memql-project)"
+            if git -C "$dir" config user.email >/dev/null 2>&1 \
+                && git -C "$dir" config user.name >/dev/null 2>&1; then
+                git -C "$dir" commit -q -m "$msg"
+            else
+                git -C "$dir" \
+                    -c "user.name=memql-project bootstrap" \
+                    -c "user.email=bootstrap@memql-project.local" \
+                    commit -q -m "$msg"
+            fi
             cap_changed
         fi
         if [[ "$CREATE_REPOS" == "github" ]]; then
