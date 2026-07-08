@@ -36,13 +36,18 @@ cap_spec_param "cockpit-repo"   "cockpit git URL (default: https://github.com/zn
 cap_spec_param "create-repos"   "create + push GitHub repos for stamped product repos: none|github (default: none)"
 cap_spec_param "shallow"        "clone engine/cockpit with --depth 1 (flag; for CI smoke runs)"
 cap_spec_param "dry-run"        "report the stamp plan without changing anything (flag)"
+cap_spec_param "go-module"      "stamp the carrier (Go module + go.work) variant instead of the DSL-first bundle (flag; only for products that need bespoke Go)"
 
 #=============================================================================
 # CONFIGURATION
 #=============================================================================
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TEMPLATE_DIRS=("carrier" "client")
+# Which product payloads to stamp. Default = the DSL-first bundle (platform
+# consolidation memql#2472): no product Go, no go.work, runtime DSL delivery.
+# --go-module switches to the carrier variant (Go module + go.work) for the
+# rare product that needs bespoke Go. Set in main() after the flag is read.
+TEMPLATE_DIRS=("bundle" "client")
 TOKEN_FILES=("README.md" "ONBOARDING.md")
 
 #=============================================================================
@@ -238,8 +243,12 @@ function generate_carrier_gosum() {
 # append_product_gitignore -- the stamped product repos are sibling git
 # repos inside the workspace root; the workspace repo must ignore them.
 function append_product_gitignore() {
-    local line
-    for line in "/${PRODUCT}-carrier/" "/${PRODUCT}-client/"; do
+    local dir line
+    # Ignore whatever was actually stamped (bundle+client by default, or
+    # carrier+client under --go-module) -- not a hardcoded set.
+    for dir in "${STAMPED_REPOS[@]:-}"; do
+        [[ -n "$dir" ]] || continue
+        line="/$(basename "$dir")/"
         grep -qxF "$line" "$ROOT/.gitignore" 2>/dev/null || {
             printf '%s\n' "$line" >> "$ROOT/.gitignore"
             cap_changed
@@ -291,8 +300,10 @@ function print_dry_run_plan() {
     cap_info "workspace root:   $ROOT"
     cap_info "engine:           $ENGINE_REPO @ $RESOLVED_ENGINE_VERSION -> memql/"
     cap_info "cockpit:          $COCKPIT_REPO -> memql-cockpit/"
-    cap_info "carrier payload:  templates/carrier -> ${PRODUCT}-carrier/ $( [[ -d "$ROOT/templates/carrier" ]] || echo '(payload absent -- skip)')"
-    cap_info "client payload:   templates/client -> ${PRODUCT}-client/ $( [[ -d "$ROOT/templates/client" ]] || echo '(payload absent -- skip)')"
+    cap_info "product model:    $( [[ -n "$GO_MODULE" ]] && echo 'carrier (Go module + go.work)' || echo 'DSL-first bundle (no product Go)')"
+    for name in "${TEMPLATE_DIRS[@]}"; do
+        cap_info "$(printf '%-16s' "${name} payload:") templates/${name} -> ${PRODUCT}-${name}/ $( [[ -d "$ROOT/templates/${name}" ]] || echo '(payload absent -- skip)')"
+    done
     cap_info "front door:       https://{identity,bff,app}.$DOMAIN"
     cap_info "create repos:     $CREATE_REPOS"
 }
@@ -328,6 +339,13 @@ function main() {
     CREATE_REPOS="$(cap_param create-repos "none")"
     SHALLOW="$(cap_flag shallow)"
     DRY_RUN="$(cap_flag dry-run)"
+    GO_MODULE="$(cap_flag go-module)"
+    # DSL-first bundle by default; carrier (Go module) only when --go-module.
+    if [[ -n "$GO_MODULE" ]]; then
+        TEMPLATE_DIRS=("carrier" "client")
+    else
+        TEMPLATE_DIRS=("bundle" "client")
+    fi
     STAMPED_REPOS=()
 
     validate_params
@@ -349,7 +367,7 @@ function main() {
     append_product_gitignore
     init_product_repos
 
-    cap_info "workspace stamped. Next: cd ${PRODUCT}-carrier && make up"
+    cap_info "workspace stamped. Next: cd ${PRODUCT}-${TEMPLATE_DIRS[0]} && make up"
     emit_result
     cap_ok
 }

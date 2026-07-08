@@ -103,7 +103,9 @@ jobs:
             exit 1
           fi
           grep -q './memql' go.work
-          grep -qxF '/demo-carrier/' .gitignore
+          # default stamp is the DSL-first bundle (memql#2472); its dir + the
+          # client dir must be ignored.
+          grep -qxF '/demo-bundle/' .gitignore
           grep -qxF '/demo-client/' .gitignore
       - name: go.work is syntactically valid
         run: cd "$STAMP_DIR" && go work edit -json > /dev/null
@@ -129,14 +131,17 @@ jobs:
             | tar -xz -C /usr/local/bin kubeconform
           kubeconform -v
 
-      # --- stamp the workspace (clones engine + cockpit siblings, stamps
-      #     __PRODUCT__-carrier + __PRODUCT__-client). ---
-      - name: stamp demo workspace
+      # --- stamp the workspace in the CARRIER (bespoke-Go) variant so this job
+      #     exercises the Go module + go.work + carrier build. --go-module is
+      #     required now that the DSL-first bundle is the default stamp
+      #     (platform consolidation memql#2472); the bundle default is covered
+      #     by stamp-smoke. ---
+      - name: stamp demo workspace (carrier variant)
         run: |
           stamp_dir="$(mktemp -d)"
           rsync -a --exclude .git ./ "$stamp_dir/"
           cd "$stamp_dir"
-          scripts/bootstrap.sh --product=demo --product-org=demo-org \
+          scripts/bootstrap.sh --product=demo --product-org=demo-org --go-module \
             --domain=demo.local --engine-version=main --shallow \
             | jq -e '.ok == true and (.result.stampedRepos | index("demo-carrier"))' > /dev/null
           echo "STAMP_DIR=$stamp_dir" >> "$GITHUB_ENV"
@@ -165,8 +170,9 @@ jobs:
           rsync -a --exclude .git ./ "$stamp_dir2/"
           cd "$stamp_dir2"
           # Reuse the first run's engine/cockpit clones as local sources so the
-          # determinism pass needs no second network fetch.
-          scripts/bootstrap.sh --product=demo --product-org=demo-org \
+          # determinism pass needs no second network fetch. --go-module to
+          # match the first stamp (this job exercises the carrier variant).
+          scripts/bootstrap.sh --product=demo --product-org=demo-org --go-module \
             --domain=demo.local --engine-version=main --shallow \
             --engine-repo="$STAMP_DIR/memql" --cockpit-repo="$STAMP_DIR/memql-cockpit" \
             | jq -e '.ok == true' > /dev/null

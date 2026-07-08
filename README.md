@@ -4,24 +4,36 @@ GitHub template for a **memQL product workspace**: the repo constellation
 that runs a product on the shared, product-agnostic
 [memQL engine](https://github.com/znasllc-io/memql).
 
-The checkout directory of this repo is the **workspace root**. After
-stamping, it holds four sibling checkouts (each its own git repository,
-ignored by this one) consolidated by a committed `go.work`:
+A product is a **DSL bundle + a client** on the shared, product-agnostic engine
+— **no product Go and no per-product node images** in the common case (platform
+consolidation, [memql#2472](https://github.com/znasllc-io/memql/issues/2472)).
+The checkout directory of this repo is the **workspace root**. After stamping,
+it holds these sibling checkouts (each its own git repository, ignored by this
+one):
 
 ```
 <workspace-root>/                 this repo, stamped from the template
-├── go.work                       consolidates the Go modules below
 ├── memql/                        the shared engine (cloned, never edited per-product)
-├── __PRODUCT__-carrier/          product DSL + integrations + deploy estate
-│                                 (Go module depending on the engine; its
-│                                 Dockerfile builds the carrier node images)
+├── __PRODUCT__-bundle/           the product DSL (.memql) + tiny data-only bundle
+│                                 image + the one deploy overlay. NO go.work,
+│                                 NO Go module -- delivered to the engine at
+│                                 runtime via MEMQL_DSL_PATH.
 ├── __PRODUCT__-client/           the product frontend (SPA)
 └── memql-cockpit/                terminal IDE / ops console (cloned)
 ```
 
+A "bff" is just a plain engine `bff` node fronting the product (mounting its
+bundle) — a deploy concern, not code. A release is `{engine version, bundle
+digest, client digest}` in one overlay in the bundle repo.
+
+**Bespoke Go (rare):** a product that genuinely needs Go the engine can't
+provide generically stamps the **carrier** variant instead
+(`scripts/bootstrap.sh ... --go-module`) — a thin `bff/` Go module + a
+`go.work` consolidating it with the engine. Prefer DSL first.
+
 The engine never names a product; products plug in through the documented
-seams (`memql/docs/public/operate/downstream-stacks.md` and
-`memql/docs/public/build/plugin-sdk.md`). The acceptance bar for the whole
+seams (`memql/docs/public/operate/downstream-stacks.md` and the
+`MEMQL_DSL_PATH` runtime-delivery mechanism). The acceptance bar for the whole
 pattern: **a second product boots a full stack with zero engine-repo edits.**
 
 ## Quickstart
@@ -33,10 +45,11 @@ pattern: **a second product boots a full stack with zero engine-repo edits.**
    scripts/bootstrap.sh --product=acme --product-org=acme-io
    ```
 
-   This clones the engine and cockpit, stamps the carrier and client repos
-   from `templates/`, substitutes the tokens below across the workspace
-   docs, regenerates `go.work`, and (when the Go toolchain is present)
-   generates the carrier's `go.sum`. Add `--create-repos=github` to also
+   This clones the engine and cockpit, stamps the **bundle** and client repos
+   from `templates/` (add `--go-module` for the carrier variant), substitutes
+   the tokens below across the workspace docs, and — only for the carrier
+   variant — regenerates `go.work` + the carrier's `go.sum`. Add
+   `--create-repos=github` to also
    create + push private GitHub repos for the stamped product repos.
 
    Alternatively run `memql-cockpit setup project` for the interactive

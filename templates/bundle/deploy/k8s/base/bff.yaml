@@ -1,0 +1,31 @@
+# __PRODUCT__ bff -- a PLAIN ENGINE bff image (product-agnostic) that fronts
+# this product by mounting its DSL bundle at runtime. No carrier build.
+# The memql/product-dsl label opts it into the engine's dsl-bundle component
+# (init-container -> MEMQL_DSL_PATH). imagePullPolicy/replicas set by overlays.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bff
+  labels:
+    app.kubernetes.io/name: bff
+    app.kubernetes.io/part-of: memql
+    memql/product-dsl: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: bff }
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bff
+        memql/product-dsl: "true"
+    spec:
+      containers:
+        - name: bff
+          image: memql-bff # pinned by the overlay images: transformer
+          env:
+            - name: MEMQL_NODE_TYPE
+              value: bff
+          ports:
+            - { name: grpc, containerPort: 50051 }
+            - { name: http, containerPort: 8085 }
