@@ -1,0 +1,48 @@
+# __PRODUCT__ -- the ONE overlay that deploys the whole product stack, local
+# k3d flavor. Platform consolidation (memql#2472): a release is
+# {engine version, bundle digest, client digest} pinned here, in one repo.
+#
+# Unlike the retired carrier model (a separate ArgoCD app for the product bff +
+# SPA layered over the engine's own app), this overlay owns the FULL stack as a
+# single ArgoCD Application:
+#   1. the engine mesh -- pulled in as a remote kustomize base pinned to the
+#      engine version (product-agnostic images; no carrier build);
+#   2. the product's DSL -- delivered at runtime by the engine's `dsl-bundle`
+#      component (init-container copies this product's bundle image into a
+#      shared volume the mesh nodes read at MEMQL_DSL_PATH);
+#   3. the product client (SPA) + edge.
+#
+# No product Go, no carrier image fleet, no cross-repo lockfile.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: memql
+
+resources:
+  # (1) The product-agnostic engine mesh, pinned to the engine version.
+  #     __ENGINE_REF__ is a git tag/branch of the public engine repo; the
+  #     images: block below pins each node image by digest.
+  - https://github.com/znasllc-io/memql//deploy/k8s/base?ref=__ENGINE_REF__
+  # (3) Product-owned edge: the bff head (a plain engine bff mounting this
+  #     product's bundle), the SPA, and the front door.
+  - ../../base
+
+components:
+  # (2) The runtime DSL-bundle delivery mechanism (owned by the engine repo):
+  #     adds the init-container + MEMQL_DSL_PATH mount to every Deployment
+  #     labelled memql/product-dsl=true (see the label patch in ../../base).
+  - https://github.com/znasllc-io/memql//deploy/k8s/components/dsl-bundle?ref=__ENGINE_REF__
+
+images:
+  # Pin the three artifacts of a release. Digests are resolved from ACR at
+  # release-assembly time (scripts/release), same immutable-tag discipline as
+  # the engine images.
+  - name: memql-dsl-bundle
+    newName: __PRODUCT_ORG___acr.azurecr.io/__PRODUCT__-dsl-bundle
+    newTag: __RELEASE_VERSION__
+  - name: __PRODUCT__-client
+    newName: __PRODUCT_ORG___acr.azurecr.io/__PRODUCT__-client
+    newTag: __RELEASE_VERSION__
+  # Engine node images (bff/cognition/agent/planner/workbench/identity/voice/
+  # mcp) are pinned by the engine base's own images: transformer at
+  # ?ref=__ENGINE_REF__; re-pin here by digest only when a hotfix requires it.
