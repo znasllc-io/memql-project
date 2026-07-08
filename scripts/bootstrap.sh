@@ -243,8 +243,12 @@ function generate_carrier_gosum() {
 # append_product_gitignore -- the stamped product repos are sibling git
 # repos inside the workspace root; the workspace repo must ignore them.
 function append_product_gitignore() {
-    local line
-    for line in "/${PRODUCT}-carrier/" "/${PRODUCT}-client/"; do
+    local dir line
+    # Ignore whatever was actually stamped (bundle+client by default, or
+    # carrier+client under --go-module) -- not a hardcoded set.
+    for dir in "${STAMPED_REPOS[@]:-}"; do
+        [[ -n "$dir" ]] || continue
+        line="/$(basename "$dir")/"
         grep -qxF "$line" "$ROOT/.gitignore" 2>/dev/null || {
             printf '%s\n' "$line" >> "$ROOT/.gitignore"
             cap_changed
@@ -363,7 +367,7 @@ function main() {
     append_product_gitignore
     init_product_repos
 
-    cap_info "workspace stamped. Next: cd ${PRODUCT}-carrier && make up"
+    cap_info "workspace stamped. Next: cd ${PRODUCT}-${TEMPLATE_DIRS[0]} && make up"
     emit_result
     cap_ok
 }
