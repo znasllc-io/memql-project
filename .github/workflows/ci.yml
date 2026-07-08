@@ -170,8 +170,9 @@ jobs:
           rsync -a --exclude .git ./ "$stamp_dir2/"
           cd "$stamp_dir2"
           # Reuse the first run's engine/cockpit clones as local sources so the
-          # determinism pass needs no second network fetch.
-          scripts/bootstrap.sh --product=demo --product-org=demo-org \
+          # determinism pass needs no second network fetch. --go-module to
+          # match the first stamp (this job exercises the carrier variant).
+          scripts/bootstrap.sh --product=demo --product-org=demo-org --go-module \
             --domain=demo.local --engine-version=main --shallow \
             --engine-repo="$STAMP_DIR/memql" --cockpit-repo="$STAMP_DIR/memql-cockpit" \
             | jq -e '.ok == true' > /dev/null
