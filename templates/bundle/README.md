@@ -38,6 +38,9 @@ only then does this repo gain a `go.mod` + the engine dependency).
 
 ## Bespoke Go (rare)
 
-If the product needs bespoke Go the engine can't provide generically, stamp the
-`carrier` variant instead of `bundle` (`--go-module`) — it carries a thin
-`bff/` module + a `go.work`. Prefer DSL first.
+The `carrier` (Go module) variant is archived on branch
+[`archive/carrier-payload`](https://github.com/znasllc-io/memql-project/tree/archive/carrier-payload);
+this DSL-first bundle is the default product shape. Genuinely one-of-a-kind Go
+warrants a thin optional `bff/` plugin module (design tracked in
+[memql-project#11](https://github.com/znasllc-io/memql-project/issues/11)).
+Prefer DSL first.
