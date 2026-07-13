@@ -21,8 +21,8 @@ profile.cov
 # vendor/
 
 # go.work IS committed here -- this repo is the workspace root and the
-# carrier Dockerfile's `COPY go.work` depends on it existing. Only the
-# machine-local sum file stays untracked.
+# committed manifest is the checked-in baseline bootstrap regenerates at
+# stamp time. Only the machine-local sum file stays untracked.
 go.work.sum
 
 # env file
@@ -31,6 +31,6 @@ go.work.sum
 # Sibling repo checkouts living inside the workspace root. Each is its own
 # git repository (cloned/scaffolded by scripts/bootstrap.sh), never tracked
 # by the workspace repo. bootstrap.sh appends the product-specific lines
-# (/<product>-carrier/, /<product>-client/) at stamp time.
+# (/<product>-bundle/, /<product>-client/) at stamp time.
 /memql/
 /memql-cockpit/

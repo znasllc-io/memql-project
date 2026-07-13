@@ -26,10 +26,12 @@ A "bff" is just a plain engine `bff` node fronting the product (mounting its
 bundle) — a deploy concern, not code. A release is `{engine version, bundle
 digest, client digest}` in one overlay in the bundle repo.
 
-**Bespoke Go (rare):** a product that genuinely needs Go the engine can't
-provide generically stamps the **carrier** variant instead
-(`scripts/bootstrap.sh ... --go-module`) — a thin `bff/` Go module + a
-`go.work` consolidating it with the engine. Prefer DSL first.
+**Bespoke Go (rare):** the **carrier** (Go module) variant is archived on
+branch [`archive/carrier-payload`](https://github.com/znasllc-io/memql-project/tree/archive/carrier-payload)
+([#9](https://github.com/znasllc-io/memql-project/issues/9)); the default
+product shape is the DSL-first bundle + client. The future bespoke-Go path — a
+thin `bff` engine plugin — is tracked in
+[#11](https://github.com/znasllc-io/memql-project/issues/11). Prefer DSL first.
 
 The engine never names a product; products plug in through the documented
 seams (`memql/docs/public/operate/downstream-stacks.md` and the
@@ -46,20 +48,21 @@ pattern: **a second product boots a full stack with zero engine-repo edits.**
    ```
 
    This clones the engine and cockpit, stamps the **bundle** and client repos
-   from `templates/` (add `--go-module` for the carrier variant), substitutes
-   the tokens below across the workspace docs, and — only for the carrier
-   variant — regenerates `go.work` + the carrier's `go.sum`. Add
-   `--create-repos=github` to also
-   create + push private GitHub repos for the stamped product repos.
+   from `templates/`, substitutes the tokens below across the workspace docs,
+   and regenerates `go.work` from the checkouts that exist. Add
+   `--create-repos=github` to also create + push private GitHub repos for the
+   stamped product repos.
 
    Alternatively run `memql-cockpit setup project` for the interactive
    wizard driving the same script.
 
-3. Bring up the local stack (k3d + ArgoCD, staging parity):
+3. Bring up the stack. The product's DSL is delivered to the shared engine at
+   runtime (`MEMQL_DSL_PATH`); see the stamped `__PRODUCT__-bundle/README.md`
+   ("How it runs") for the bundle's deploy path.
 
-   ```bash
-   cd __PRODUCT__-carrier && make up
-   ```
+   > The carrier's k3d/ArgoCD local-stack `make up` was archived with the
+   > carrier variant; the bundle local-run guide is reworked in
+   > [#10](https://github.com/znasllc-io/memql-project/issues/10).
 
    The front door serves `https://identity.__DOMAIN__`,
    `https://bff.__DOMAIN__`, and `https://app.__DOMAIN__`.
@@ -89,7 +92,7 @@ tolerance). The engine org (`znasllc-io`) stays literal.
 | `ONBOARDING.md` | the cross-repo developer guide the stamp personalizes |
 | `scripts/bootstrap.sh` | the stamper -- a capability script (JSON envelope on stdout, honest exit codes) |
 | `scripts/lib/capability.sh` | vendored capability-script runtime from the engine |
-| `templates/carrier/` | parameterized carrier repo payload (82 artifacts) |
+| `templates/bundle/` | parameterized DSL-first bundle repo payload (the default stamp) |
 | `templates/client/` | parameterized client repo payload (full app shell) |
 
 Note on the shared local domain: two stamped products default to the same

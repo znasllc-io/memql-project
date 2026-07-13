@@ -6,6 +6,5 @@ go 1.26.3
 
 use (
 	./memql
-	./__PRODUCT__-carrier
 	./memql-cockpit
 )

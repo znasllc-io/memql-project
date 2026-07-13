@@ -3,6 +3,18 @@
 A guide to the sibling repos in this workspace, how they fit together, and
 how to make changes that cross repo boundaries without breaking CI.
 
+> **Note (carrier archived).** The **carrier** (Go module) variant this guide
+> describes is archived on branch
+> [`archive/carrier-payload`](https://github.com/znasllc-io/memql-project/tree/archive/carrier-payload)
+> ([#9](https://github.com/znasllc-io/memql-project/issues/9)). The default
+> product shape is now the **DSL-first bundle + client** (no product Go, no
+> product `go.work`). The carrier-centric sections below (the
+> `__PRODUCT__-carrier` repo, the SDK three-tier flow, the local-stack and
+> drift gates) are being reworked wholesale in
+> [#10](https://github.com/znasllc-io/memql-project/issues/10); the future
+> bespoke-Go path (a thin `bff` plugin) is tracked in
+> [#11](https://github.com/znasllc-io/memql-project/issues/11).
+
 > Everything lives as **siblings under this workspace root** and is tied
 > together by a Go workspace (`go.work`) + `replace` dependency links.
 > `scripts/bootstrap.sh` produces this layout; if a checkout is missing,
