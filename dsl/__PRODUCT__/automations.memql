@@ -1,0 +1,26 @@
+// automations.memql -- the __PRODUCT__ product pack (starter). Pure DSL, no Go.
+//
+// One event-driven automation that reacts to a graph lifecycle event and runs a
+// pure-DSL logic step -- ZERO product Go, no integration executor. It hooks the
+// pack's OWN greeting concept so the starter tree is self-contained (it resolves
+// under dslimports.Load / memqllint with no core namespace present). A real pack
+// often hooks a CORE service event instead
+// (@trigger(event="node.created", concept="v1:<core>:<concept>", ...)) to react
+// to the engine's own rows -- the core has no knowledge of the pack.
+//
+// The step calls onGreetingCreated (logic.memql), which reads the owner's
+// greetings via the owned query. This exercises the full
+// event -> automation -> logic -> query path on a plain engine with no product
+// code. Note the trigger names the concept by its canonical id STRING; that is
+// not a DSL import, so no `use` of the concept is needed here.
+
+use __PRODUCT__.logic.{ onGreetingCreated }
+
+@enabled
+@trigger(event="node.created", concept="v1:__PRODUCT__:greeting", partition="*")
+@description("On creation of a greeting, run the pure-DSL onGreetingCreated logic. Demonstrates a pack automation firing on a graph event with zero product Go.")
+automation greetOnGreetingCreate {
+  step react {
+    logic onGreetingCreated ( event: event )
+  }
+}

@@ -1,36 +1,34 @@
-# If you prefer the allow list template instead of the deny list, see community template:
-# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
+# memQL product repo (DSL-first; no Go in the common case).
 #
-# Binaries for programs and plugins
+# product.env is COMMITTED, not ignored: it is the product's identity that every
+# operational file reads (scripts/init.sh writes it at stamp time). The engine +
+# cockpit are cloned as SIBLINGS in the PARENT directory, so they are outside
+# this repo and need no ignore entry here.
+
+# Node / client build artifacts (client/ also has its own .gitignore).
+node_modules/
+dist/
+
+# Env / secrets (never commit real secrets).
+.env
+.env.local
+*.local
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Logs
+npm-debug.log*
+
+# Go (only if a product later adds a bff plugin module -- memql-project#11).
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
-
-# Test binary, built with `go test -c`
 *.test
-
-# Code coverage profiles and other test artifacts
 *.out
 coverage.*
-*.coverprofile
-profile.cov
-
-# Dependency directories (remove the comment below to include it)
-# vendor/
-
-# go.work IS committed here -- this repo is the workspace root and the
-# committed manifest is the checked-in baseline bootstrap regenerates at
-# stamp time. Only the machine-local sum file stays untracked.
 go.work.sum
-
-# env file
-.env
-
-# Sibling repo checkouts living inside the workspace root. Each is its own
-# git repository (cloned/scaffolded by scripts/bootstrap.sh), never tracked
-# by the workspace repo. bootstrap.sh appends the product-specific lines
-# (/<product>-bundle/, /<product>-client/) at stamp time.
-/memql/
-/memql-cockpit/

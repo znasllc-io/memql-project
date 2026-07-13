@@ -1,0 +1,37 @@
+# __PRODUCT__ LOCAL overlay -- the product Application (`__PRODUCT__-local`) for
+# the local k3d stack. It owns ONLY product resources: the bff head + SPA
+# (../../base), the runtime DSL-bundle delivery (the vendored dsl-bundle
+# component), and the traefik front door. The engine mesh is the SEPARATE
+# `memql-local` Application registered by `make -C ../memql up`.
+#
+# Local image discipline (mirrors the engine's local overlay): mutable `:local`
+# tags + IfNotPresent, because images are `k3d image import`ed, never pulled
+# from a registry. No digest pins here (staging/prod pin by digest). Works with
+# REGISTRY unset -- there is no registry in the local flow.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: memql
+
+resources:
+  - ../../base
+  - front-door.yaml
+
+components:
+  - ../../components/dsl-bundle
+
+images:
+  # The engine bff image the product bff runs: built + imported by
+  # `make -C ../memql up` as memql-bff:local.
+  - name: memql-bff
+    newName: memql-bff
+    newTag: local
+  # The product's DSL bundle: built from dsl/ + deploy/Dockerfile.bundle and
+  # imported by the root `make up` as __PRODUCT__-dsl-bundle:local.
+  - name: memql-dsl-bundle
+    newName: __PRODUCT__-dsl-bundle
+    newTag: local
+  # The product SPA: built from client/ and imported as __PRODUCT__-client:local.
+  - name: __PRODUCT__-client
+    newName: __PRODUCT__-client
+    newTag: local

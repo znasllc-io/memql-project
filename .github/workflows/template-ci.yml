@@ -1,0 +1,119 @@
+name: template-ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  merge_group:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# TEMPLATE-ONLY lanes: they exercise scripts/init.sh end-to-end (stamp a demo
+# product and assert it is clean + working). Guarded to the template repo so a
+# stamped instance -- which prunes this file anyway -- never runs them. These
+# are NOT required checks; the required gate is ci.yml's `ci-required` + the
+# gitleaks `scan`.
+jobs:
+  init-smoke:
+    name: init-smoke
+    if: github.repository == 'znasllc-io/memql-project'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4
+        with:
+          node-version: '20'
+
+      - name: stamp a demo product in a temp copy
+        run: |
+          set -euo pipefail
+          stamp_dir="$(mktemp -d)"
+          rsync -a --exclude .git ./ "$stamp_dir/"
+          cd "$stamp_dir"
+          scripts/init.sh --product=demo --product-org=demo-org --domain=demo.local --skip-clones \
+            | tee /tmp/init.json
+          jq -e '.ok == true and .changed == true and .result.product == "demo"' /tmp/init.json > /dev/null
+          echo "STAMP_DIR=$stamp_dir" >> "$GITHUB_ENV"
+
+      - name: zero leftover tokens (zero tolerance)
+        # scripts/ is excluded: the stamper (scripts/init.sh) legitimately
+        # references the token literals it substitutes; it is operational and
+        # byte-identical to the template. Everything init is meant to stamp
+        # (dsl/deploy/client/docs) must be token-free.
+        run: |
+          cd "$STAMP_DIR"
+          if grep -rn --exclude-dir=scripts --exclude-dir=node_modules \
+              '__PRODUCT__\|__PRODUCT_ORG__\|__DOMAIN__\|__ENGINE_REF__\|__ENGINE_VERSION__\|__REGISTRY__' .; then
+            echo "ERROR: unsubstituted template token in the stamped product" >&2
+            exit 1
+          fi
+
+      - name: zero source-product leakage (copresent|visionarys|fylo)
+        run: |
+          cd "$STAMP_DIR"
+          if grep -rniE 'copresent|visionarys|fylo' .; then
+            echo "ERROR: source-product name leaked into the stamped product" >&2
+            exit 1
+          fi
+
+      - name: structural assertions (renames + product.env + prune)
+        run: |
+          cd "$STAMP_DIR"
+          test -d dsl/demo
+          test ! -e dsl/__PRODUCT__
+          test -f deploy/argocd/apps/demo-staging.yaml
+          test -f deploy/argocd/apps/demo-prod.yaml
+          test -f product.env && grep -qx 'PRODUCT=demo' product.env
+          test ! -e product.env.example
+          test ! -e .github/workflows/template-ci.yml   # pruned in the stamped copy
+
+      - name: kustomize renders every overlay (stamped)
+        run: |
+          for o in local staging prod; do
+            echo "==> render deploy/k8s/overlays/$o"
+            kubectl kustomize "$STAMP_DIR/deploy/k8s/overlays/$o" > /dev/null
+          done
+
+      - name: client npm install + build + lint (stamped, self-contained)
+        working-directory: ${{ env.STAMP_DIR }}/client
+        run: |
+          npm install --no-audit --no-fund
+          npm run typecheck
+          npm run build
+          npm run lint
+
+      - name: idempotent re-run reports changed:false
+        run: |
+          cd "$STAMP_DIR"
+          scripts/init.sh --product=demo --product-org=demo-org --domain=demo.local --skip-clones \
+            | jq -e '.ok == true and .changed == false' > /dev/null
+
+  stamped-dsl:
+    name: stamped-dsl
+    if: github.repository == 'znasllc-io/memql-project'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.26.4'
+          cache: false
+      - name: stamp a demo product
+        run: |
+          set -euo pipefail
+          stamp_dir="$(mktemp -d)"
+          rsync -a --exclude .git ./ "$stamp_dir/"
+          cd "$stamp_dir"
+          scripts/init.sh --product=demo --product-org=demo-org --skip-clones > /dev/null
+          echo "STAMP_DIR=$stamp_dir" >> "$GITHUB_ENV"
+      - name: memqllint the stamped DSL against the engine
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/znasllc-io/memql.git /tmp/memql
+          cd /tmp/memql && go run ./cmd/memqllint "$STAMP_DIR/dsl/demo"

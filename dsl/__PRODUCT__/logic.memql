@@ -1,0 +1,20 @@
+// logic.memql -- the __PRODUCT__ product pack (starter). Pure DSL, no Go.
+//
+// A callable pure-DSL body the greetOnGreetingCreate automation runs on a graph
+// event. It reads the caller's greetings via the owned query -- demonstrating
+// the event -> automation -> logic -> query path with ZERO product Go and no
+// integration executor. A real product typically writes a row or calls an
+// integration.<name>.* capability here; the latter needs a thin bff plugin
+// (bespoke Go), tracked in memql-project#11. Prefer pure DSL first.
+
+use __PRODUCT__.queries.{ myGreetings }
+
+@description("Pure-DSL reaction to a greeting-created event: reads the owner's greetings via the owned query. Demonstrates a zero-Go automation body.")
+logic onGreetingCreated {
+  args {
+    event  object  @required
+  }
+  body {
+    return query myGreetings()
+  }
+}

@@ -1,0 +1,25 @@
+// tools.memql -- the __PRODUCT__ product pack (starter). Pure DSL, no Go.
+//
+// Two AI-callable tools, each wired to a named owned query/mutation via a
+// `@handler(type="query", ...)` -- the ENGINE runs the DSL construct directly,
+// so the tool loop works on a plain engine with zero product Go and no
+// integration executor. Per-row authz on the underlying query/mutation gates
+// every call to the caller's own rows (ownerUserId==actor.userId), so the tool
+// surface carries no ownerUserId arg for the LLM to forge. Grow this file with
+// the product's own tools.
+
+@enabled
+@handler(type="query", query="query myGreetings()")
+@executionTime("fast")
+@description("List the caller's greetings (id, message, createdAt). Read-only; owned -- only the caller's own greetings are returned.")
+tool __PRODUCT__ListGreetings {
+}
+
+@enabled
+@handler(type="query", query="mutation createGreeting(greetingId: \"$args.greetingId\", message: \"$args.message\")")
+@executionTime("fast")
+@description("Create a greeting for the caller. Owned: ownership is server-stamped. Pass a fresh unique greetingId and the message text.")
+tool __PRODUCT__CreateGreeting {
+  greetingId  string  @required  @description("Fresh unique id for the new greeting, e.g. a UUID.")
+  message     string  @required  @description("The greeting text.")
+}

@@ -15,10 +15,53 @@ concurrency:
 permissions:
   contents: read
 
-# BRANCH-PROTECTION SAFETY: the single required check from this workflow is
-# the `ci-required` aggregator at the bottom (plus `scan` from gitleaks.yml).
+# PRODUCT CI: the lanes that ship to every stamped instance and also pass
+# in-template against the starter payload. Path-filtered (client/deploy/dsl),
+# fail-open to running when the diff base is unknown (push / merge_group / first
+# push) so a lane is never falsely skipped.
+#
+# BRANCH-PROTECTION SAFETY: the single required check from this workflow is the
+# `ci-required` aggregator at the bottom (plus `scan` from gitleaks.yml).
 # Individual jobs must NOT be required checks.
 jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    outputs:
+      client: ${{ steps.filter.outputs.client }}
+      deploy: ${{ steps.filter.outputs.deploy }}
+      dsl: ${{ steps.filter.outputs.dsl }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - id: filter
+        name: detect changed areas (fail open to running)
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          base=""
+          case "$EVENT_NAME" in
+            pull_request) base="$BASE_SHA" ;;
+            push)         base="$BEFORE_SHA" ;;
+          esac
+          run_all() { echo "client=true" >> "$GITHUB_OUTPUT"; echo "deploy=true" >> "$GITHUB_OUTPUT"; echo "dsl=true" >> "$GITHUB_OUTPUT"; }
+          if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "diff base unknown ($EVENT_NAME) -> running all lanes"
+            run_all; exit 0
+          fi
+          changed="$(git diff --name-only "$base" HEAD || true)"
+          echo "changed files:"; echo "$changed"
+          emit() { if echo "$changed" | grep -qE "$2"; then echo "$1=true" >> "$GITHUB_OUTPUT"; else echo "$1=false" >> "$GITHUB_OUTPUT"; fi; }
+          # A change to CI or the stamper re-runs everything (they affect all lanes).
+          if echo "$changed" | grep -qE '^\.github/|^scripts/|^product\.env'; then run_all; exit 0; fi
+          emit client '^client/'
+          emit deploy '^deploy/'
+          emit dsl    '^dsl/'
+
   shellcheck:
     name: shellcheck
     runs-on: ubuntu-latest
@@ -27,7 +70,7 @@ jobs:
       - name: shellcheck scripts
         run: |
           shellcheck --version
-          find scripts -name '*.sh' -print0 | xargs -0 shellcheck --severity=warning
+          find scripts client/scripts -name '*.sh' -print0 | xargs -0 shellcheck --severity=warning
 
   capability-conformance:
     name: capability-conformance
@@ -37,13 +80,11 @@ jobs:
       - name: bash syntax
         run: find scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n
       - name: print-spec emits valid JSON
-        run: scripts/bootstrap.sh --print-spec | jq -e '.capability == "project.bootstrap" and (.params | length) >= 8'
+        run: scripts/init.sh --print-spec | jq -e '.capability == "product.init" and (.params | length) >= 8'
       - name: help exits 0
-        run: scripts/bootstrap.sh --help > /dev/null
+        run: scripts/init.sh --help > /dev/null
       - name: no interactive prompts in scripts
         run: |
-          # Match real code only -- comment lines (leading #) may legally
-          # MENTION read -p (capability.sh documents why it is banned).
           if grep -rnE 'read -p|^[[:space:]]*select ' scripts/ | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#'; then
             echo "ERROR: interactive prompt found; capability scripts are non-interactive" >&2
             exit 1
@@ -51,130 +92,121 @@ jobs:
       - name: missing required param exits 2 with failure envelope
         run: |
           set +e
-          out="$(scripts/bootstrap.sh --product-org=demo-org 2>/dev/null)"
+          out="$(scripts/init.sh --product-org=demo-org 2>/dev/null)"
           code=$?
           set -e
           [ "$code" -eq 2 ] || { echo "expected exit 2, got $code" >&2; exit 1; }
           echo "$out" | jq -e '.ok == false and .error.code == 2' > /dev/null
-      - name: invalid enum exits 2
+      - name: unknown flag exits 2
         run: |
           set +e
-          scripts/bootstrap.sh --product=demo --product-org=demo-org --create-repos=bogus > /dev/null 2>&1
+          scripts/init.sh --product=demo --product-org=demo-org --bogus-flag > /dev/null 2>&1
           code=$?
           set -e
-          [ "$code" -eq 2 ] || { echo "expected exit 2, got $code" >&2; exit 1; }
+          [ "$code" -eq 2 ] || { echo "expected exit 2 for unknown flag, got $code" >&2; exit 1; }
       - name: dry-run emits success envelope without changing anything
         run: |
           before="$(git status --porcelain)"
-          scripts/bootstrap.sh --product=demo --product-org=demo-org --dry-run \
+          scripts/init.sh --product=demo --product-org=demo-org --skip-clones --dry-run \
             | jq -e '.ok == true and .result.dryRun == true and .changed == false' > /dev/null
           after="$(git status --porcelain)"
           [ "$before" = "$after" ] || { echo "dry-run mutated the tree" >&2; exit 1; }
 
-  stamp-smoke:
-    name: stamp-smoke
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
-        with:
-          go-version: '1.26.4'
-          cache: true
-      - name: stamp into a temp workspace
-        run: |
-          stamp_dir="$(mktemp -d)"
-          rsync -a --exclude .git ./ "$stamp_dir/"
-          cd "$stamp_dir"
-          scripts/bootstrap.sh --product=demo --product-org=demo-org \
-            --domain=demo.local --engine-version=main --shallow \
-            | tee /tmp/stamp-envelope.json
-          jq -e '.ok == true and .changed == true and .result.product == "demo"' /tmp/stamp-envelope.json > /dev/null
-          echo "STAMP_DIR=$stamp_dir" >> "$GITHUB_ENV"
-      - name: stamped tree assertions
-        run: |
-          cd "$STAMP_DIR"
-          test -d memql/.git
-          test -d memql-cockpit/.git
-          test -f go.work
-          # Zero token tolerance in generated/substituted files.
-          if grep -rn '__PRODUCT__\|__PRODUCT_ORG__\|__DOMAIN__\|__ENGINE_VERSION__' \
-              go.work README.md ONBOARDING.md .gitignore; then
-            echo "ERROR: unsubstituted template token in stamped workspace files" >&2
-            exit 1
-          fi
-          grep -q './memql' go.work
-          # default stamp is the DSL-first bundle (memql#2472); its dir + the
-          # client dir must be ignored.
-          grep -qxF '/demo-bundle/' .gitignore
-          grep -qxF '/demo-client/' .gitignore
-      - name: go.work is syntactically valid
-        run: cd "$STAMP_DIR" && go work edit -json > /dev/null
-      - name: stamp is idempotent for existing checkouts
-        run: |
-          cd "$STAMP_DIR"
-          scripts/bootstrap.sh --product=demo --product-org=demo-org \
-            --domain=demo.local --engine-version=main --shallow \
-            | jq -e '.ok == true' > /dev/null
-
-  client-payload:
-    name: client-payload
+  client:
+    name: client
+    needs: changes
+    if: needs.changes.outputs.client == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4
         with:
           node-version: '20'
-
-      # Stamp the workspace (clones engine + cockpit siblings, stamps
-      # __PRODUCT__-bundle + __PRODUCT__-client).
-      - name: stamp demo workspace
-        run: |
-          stamp_dir="$(mktemp -d)"
-          rsync -a --exclude .git ./ "$stamp_dir/"
-          cd "$stamp_dir"
-          scripts/bootstrap.sh --product=demo --product-org=demo-org \
-            --domain=demo.local --engine-version=main --shallow \
-            | jq -e '.ok == true and (.result.stampedRepos | index("demo-client"))' > /dev/null
-          echo "STAMP_DIR=$stamp_dir" >> "$GITHUB_ENV"
-
-      - name: no leftover tokens in the stamped client
-        run: |
-          cd "$STAMP_DIR/demo-client"
-          if grep -rn '__PRODUCT__\|__PRODUCT_ORG__\|__DOMAIN__\|__ENGINE_VERSION__' .; then
-            echo "ERROR: unsubstituted template token in the stamped client" >&2
-            exit 1
-          fi
-
-      - name: no copresent/visionarys leakage in the stamped client
-        run: |
-          cd "$STAMP_DIR/demo-client"
-          if grep -rniE 'copresent|visionarys' .; then
-            echo "ERROR: source-product name leaked into the stamped client" >&2
-            exit 1
-          fi
-
       # The starter shell is SELF-CONTAINED (a thin local memQL client + a local
-      # generated concepts module in the sdk-gen A3 shape), so it depends on zero
-      # GitHub Packages / private SDKs: `npm install` needs NO NODE_AUTH_TOKEN and
-      # the full typecheck + build + lint run unconditionally. A product wiring
-      # the published @__PRODUCT_ORG__/__PRODUCT__-sdk later reintroduces the token
-      # (see the stamped client's README 'SDK resolution').
+      # generated concepts module), so it depends on zero private SDKs: npm
+      # install needs NO NODE_AUTH_TOKEN and the full typecheck+build+lint run
+      # unconditionally, in-template (unstamped) and in every stamped instance.
       - name: npm install + typecheck + build + lint
-        working-directory: ${{ env.STAMP_DIR }}/demo-client
+        working-directory: client
         run: |
           npm install --no-audit --no-fund
           npm run typecheck
           npm run build
           npm run lint
 
+  deploy:
+    name: deploy
+    needs: changes
+    if: needs.changes.outputs.deploy == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: kustomize renders every overlay
+        run: |
+          for o in local staging prod; do
+            echo "==> render deploy/k8s/overlays/$o"
+            kubectl kustomize "deploy/k8s/overlays/$o" > "/tmp/render-$o.yaml"
+          done
+      - name: digest gate (staging/prod product images pinned by @sha256; local exempt)
+        run: |
+          set -euo pipefail
+          for o in staging prod; do
+            # Product images (the DSL bundle + the client SPA) must be digest-pinned.
+            bad="$(grep -E '^\s*(-?\s*)?image:.*(-dsl-bundle|-client)' "/tmp/render-$o.yaml" | grep -v '@sha256:' || true)"
+            if [ -n "$bad" ]; then
+              echo "ERROR: $o overlay has a floating (non-digest) product image:" >&2
+              echo "$bad" >&2
+              exit 1
+            fi
+          done
+          # The local overlay is exempt: it uses mutable :local tags for k3d import.
+          grep -qE 'dsl-bundle:local' /tmp/render-local.yaml
+          echo "digest gate OK"
+
+  dsl:
+    name: dsl
+    needs: changes
+    if: needs.changes.outputs.dsl == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.26.4'
+          cache: false
+      # Best-available no-Go-repo validation: the engine's own load pipeline via
+      # `go run ./cmd/memqllint` against a sibling engine clone. It checks parse
+      # + import-graph integrity for the procedural kinds (query/mutation/logic/
+      # automation/spec/trait); it does NOT resolve executor names or validate
+      # builtin/tool bodies (a live boot does). Engine ref from product.env if
+      # present (a stamped instance), else main (in-template).
+      - name: clone the engine (for memqllint)
+        run: |
+          ref=main
+          if [ -f product.env ]; then
+            # shellcheck disable=SC1091
+            . ./product.env
+            [ -n "${ENGINE_REF:-}" ] && ref="$ENGINE_REF"
+          fi
+          echo "engine ref: $ref"
+          git clone --depth 1 --branch "$ref" https://github.com/znasllc-io/memql.git /tmp/memql \
+            || git clone --depth 1 https://github.com/znasllc-io/memql.git /tmp/memql
+      - name: memqllint the product DSL tree
+        run: |
+          set -euo pipefail
+          dsl_dir="$(find "$PWD/dsl" -mindepth 1 -maxdepth 1 -type d | head -1)"
+          [ -n "$dsl_dir" ] || { echo "no dsl/<domain> dir found" >&2; exit 1; }
+          echo "linting: $dsl_dir"
+          cd /tmp/memql && go run ./cmd/memqllint "$dsl_dir"
+
   ci-required:
     name: ci-required
-    needs: [shellcheck, capability-conformance, stamp-smoke, client-payload]
+    needs: [changes, shellcheck, capability-conformance, client, deploy, dsl]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: all lanes green
+      - name: all lanes green (skipped path-filtered lanes are OK)
         run: |
           results='${{ toJSON(needs) }}'
-          echo "$results" | jq -e 'to_entries | all(.value.result == "success")' > /dev/null \
-            || { echo "a required lane failed or was cancelled" >&2; exit 1; }
+          echo "$results" | jq -e 'to_entries | all(.value.result == "success" or .value.result == "skipped")' > /dev/null \
+            || { echo "a required lane failed or was cancelled" >&2; echo "$results" | jq .; exit 1; }

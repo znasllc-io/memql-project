@@ -1,0 +1,17 @@
+// queries.memql -- the __PRODUCT__ product pack (starter). Pure DSL, no Go.
+//
+// One owned-tier read executed by the ENGINE itself. myGreetings gates the row
+// set on ownerUserId==actor.userId server-side, so cross-user reads are
+// impossible; no arg widens the set beyond the caller's ownership. Grow this
+// file with the product's own queries.
+
+use __PRODUCT__.concepts.{ greeting }
+
+@enabled
+@description("List the caller's greetings, newest first. Owned: the row set is gated by ownerUserId==actor.userId server-side, so cross-user reads are impossible.")
+query greeting myGreetings {
+  filter   ownerUserId==actor.userId
+  sort     "createdAt", "desc"
+  paginate 50
+  shape    greetingFull
+}

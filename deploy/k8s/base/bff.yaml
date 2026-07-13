@@ -1,0 +1,130 @@
+# bff-__PRODUCT__ -- the __PRODUCT__ product's OWN bff head.
+#
+# It is a plain, product-agnostic engine `bff` node (the engine `memql-bff`
+# image, retargeted per-overlay) that fronts THIS product by mounting its DSL
+# bundle at runtime. Two things make it the product bff and not the engine's
+# neutral one:
+#   1. label `memql/product-dsl: "true"` -- opts this Deployment into the
+#      vendored dsl-bundle component, which adds the init-container that copies
+#      the product's .memql tree to MEMQL_DSL_PATH; the plain engine image then
+#      loads the product DSL with zero compiled-in product code.
+#   2. a distinct name/Service `bff-__PRODUCT__` -- so it coexists as a peer with
+#      the engine Application's neutral `bff` in the shared `memql` namespace
+#      (the engine base ships the neutral bff via its engine-bff component; a
+#      product brings its own labelled head -- see the engine
+#      deploy/k8s/components/engine-bff/bff.yaml header).
+#
+# NO product code, NO product-specific engine image, NO pre-existing
+# initContainers (the dsl-bundle component sets that array wholesale).
+# imagePullPolicy/replicas and the image pin are set by the overlays.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bff-__PRODUCT__
+  labels:
+    app.kubernetes.io/name: bff-__PRODUCT__
+    app.kubernetes.io/part-of: memql
+    memql/node-type: bff
+    memql/product-dsl: "true"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bff-__PRODUCT__
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bff-__PRODUCT__
+        app.kubernetes.io/part-of: memql
+        memql/node-type: bff
+    spec:
+      volumes:
+        - name: memql-ca
+          secret:
+            secretName: memql-ca
+      terminationGracePeriodSeconds: 45
+      containers:
+        - name: bff
+          image: memql-bff # pinned by the overlay images: transformer
+          imagePullPolicy: IfNotPresent
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 5"]
+          ports:
+            - { name: http, containerPort: 8085 }
+            - { name: grpc, containerPort: 50051 }
+            - { name: node, containerPort: 50058 }
+          envFrom:
+            - secretRef:
+                name: memql-secrets
+            - configMapRef:
+                name: memql-db-pool
+          env:
+            - { name: MEMQL_GENESIS_AUTOLOAD, value: "true" }
+            - { name: SERVICE_NAME, value: "memQL" }
+            - { name: MEMQL_NODE_TYPE, value: "bff" }
+            - { name: MEMQL_NODE_ADDRESS, value: "bff-__PRODUCT__:50058" }
+            # Unique per-pod mesh identity: overrides the shared genesis
+            # MEMQL_NODE_ID so PeerManager keys each pod distinctly.
+            - { name: MEMQL_NODE_ID, valueFrom: { fieldRef: { fieldPath: metadata.name } } }
+            - { name: MEMQL_DEPLOYMENT_ID, valueFrom: { fieldRef: { fieldPath: "metadata.labels['pod-template-hash']" } } }
+            - { name: MEMQL_NODE_SERVICE_ADDRESS, value: ":50058" }
+            # Reach the shared engine leaf nodes (owned by the engine Application).
+            - { name: MEMQL_WORKER_PEERS, value: "voice=voice:50059,agent=agent:50055,cognition=cognition:50054,planner=planner:50056,workbench=workbench:50060" }
+            - { name: MEMQL_GRPC_ADDRESS, value: ":50051" }
+            - { name: SERVER_ADDRESS, value: "0.0.0.0:8085" }
+            - { name: MEMQL_IDENTITY_VERIFIER_BASE_URL, value: "https://identity:8085" }
+            - { name: MEMQL_IDENTITY_VERIFIER_AUDIENCE, value: "memql" }
+            - { name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER, value: "https://identity.__DOMAIN__" }
+            - { name: MEMQL_IDENTITY_ENABLED, value: "false" }
+            - { name: MEMQL_HTTP_TLS_CA_FILE, value: "/etc/memql/cacerts/ca.crt" }
+            - { name: SSL_CERT_DIR, value: "/etc/ssl/certs:/etc/memql/cacerts" }
+            - { name: SERVER_ALLOWED_ORIGINS, value: "*" }
+            # Shared DB -- migrations run once on the engine identity node.
+            - { name: MEMORY_NODES_DATABASE_MIGRATE_ON_START, value: "false" }
+          volumeMounts:
+            - { name: memql-ca, mountPath: /etc/memql/cacerts, readOnly: true }
+          startupProbe:
+            httpGet: { path: /healthz, port: 8085 }
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8085 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /livez, port: 8085 }
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 4
+          resources:
+            requests: { cpu: 200m, memory: 256Mi }
+---
+# In-mesh + front-door target for the product bff (gRPC 50051, HTTP/WS 8085,
+# node 50058). The SPA reaches it through the front door; native gRPC clients
+# reach it at bff.__DOMAIN__.
+apiVersion: v1
+kind: Service
+metadata:
+  name: bff-__PRODUCT__
+  labels:
+    app.kubernetes.io/name: bff-__PRODUCT__
+    app.kubernetes.io/part-of: memql
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: bff-__PRODUCT__
+  ports:
+    - { name: node, port: 50058, targetPort: 50058 }
+    - { name: http, port: 8085, targetPort: 8085 }
+    - { name: grpc, port: 50051, targetPort: 50051 }

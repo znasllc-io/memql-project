@@ -1,0 +1,54 @@
+# __PRODUCT__ front door on the local k3d cluster. traefik terminates TLS on
+# 443 with the operator's mkcert wildcard (local-znas-tls, seeded engine-side by
+# `make -C ../memql up`) and routes by hostname:
+#   https://bff.__DOMAIN__  -> the product bff's HTTP surface (the /memql/ws
+#                              bridge the SPA consumes).
+#   https://app.__DOMAIN__  -> the in-cluster SPA, with the same path-routing as
+#                              the deployed public entry: /memql/audio -> voice,
+#                              /memql -> the product bff, the auth paths ->
+#                              identity, / -> the SPA.
+# voice + identity are engine services (owned by the engine Application); an
+# Ingress routes to any Service in the namespace by name.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bff-front-door
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  tls:
+    - hosts: ["bff.__DOMAIN__"]
+      secretName: local-znas-tls
+  rules:
+    - host: bff.__DOMAIN__
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bff-__PRODUCT__
+                port:
+                  number: 8085
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app-front-door
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  tls:
+    - hosts: ["app.__DOMAIN__"]
+      secretName: local-znas-tls
+  rules:
+    - host: app.__DOMAIN__
+      http:
+        paths:
+          - { path: /memql/audio, pathType: Prefix, backend: { service: { name: voice, port: { number: 8085 } } } }
+          - { path: /memql, pathType: Prefix, backend: { service: { name: bff-__PRODUCT__, port: { number: 8085 } } } }
+          - { path: /auth/refresh, pathType: Prefix, backend: { service: { name: identity, port: { number: 8085 } } } }
+          - { path: /auth/logout, pathType: Prefix, backend: { service: { name: identity, port: { number: 8085 } } } }
+          - { path: /oauth/token, pathType: Prefix, backend: { service: { name: identity, port: { number: 8085 } } } }
+          - { path: /.well-known/jwks.json, pathType: Prefix, backend: { service: { name: identity, port: { number: 8085 } } } }
+          - { path: /, pathType: Prefix, backend: { service: { name: __PRODUCT__, port: { number: 8080 } } } }

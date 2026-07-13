@@ -1,206 +1,157 @@
-# Onboarding -- the __PRODUCT__ workspace
+# Onboarding -- the __PRODUCT__ product
 
-A guide to the sibling repos in this workspace, how they fit together, and
-how to make changes that cross repo boundaries without breaking CI.
+How this repo fits together, how it composes with the shared engine, and how to
+make changes without breaking CI. __PRODUCT__ is a **single-repo memQL product**:
+a DSL bundle + a client running on the product-agnostic
+[memQL engine](https://github.com/znasllc-io/memql). No carrier repo, no product
+`go.work`, no product Go in the common case.
 
-> **Note (carrier archived).** The **carrier** (Go module) variant this guide
-> describes is archived on branch
-> [`archive/carrier-payload`](https://github.com/znasllc-io/memql-project/tree/archive/carrier-payload)
-> ([#9](https://github.com/znasllc-io/memql-project/issues/9)). The default
-> product shape is now the **DSL-first bundle + client** (no product Go, no
-> product `go.work`). The carrier-centric sections below (the
-> `__PRODUCT__-carrier` repo, the SDK three-tier flow, the local-stack and
-> drift gates) are being reworked wholesale in
-> [#10](https://github.com/znasllc-io/memql-project/issues/10); the future
-> bespoke-Go path (a thin `bff` plugin) is tracked in
-> [#11](https://github.com/znasllc-io/memql-project/issues/11).
+## The workspace
 
-> Everything lives as **siblings under this workspace root** and is tied
-> together by a Go workspace (`go.work`) + `replace` dependency links.
-> `scripts/bootstrap.sh` produces this layout; if a checkout is missing,
-> the cross-repo tooling won't resolve.
+Everything lives under a **parent directory** (the workspace). `scripts/init.sh`
+clones the engine + cockpit as siblings of this repo:
 
----
+```
+<workspace>/
+├── __PRODUCT__/          THIS repo -- the whole product (dsl/ + client/ + deploy/)
+├── memql/                the shared engine (Go + MemQL DSL); product-agnostic, read-only for product work
+└── memql-cockpit/        terminal-native IDE + ops console for clusters
+```
 
-## The repos
+| Repo | Remote | Role |
+|---|---|---|
+| `__PRODUCT__` | `__PRODUCT_ORG__/__PRODUCT__` | This product: DSL (`dsl/__PRODUCT__/`), client SPA (`client/`), deploy estate (`deploy/`). |
+| `memql` | `znasllc-io/memql` | The engine: memory graph DB, AI, cluster nodes, the SDK generator + runtime core. Never edit it for product work. |
+| `memql-cockpit` | `znasllc-io/memql-cockpit` | Terminal IDE / ops console; also the worker runtime. |
 
-| Repo | Remote | Stack | Role |
-|---|---|---|---|
-| `memql` | `znasllc-io/memql` | Go + MemQL DSL | The shared engine: time-series memory graph DB, AI integration, cluster nodes, **and** the SDK generator + runtime core. Product-agnostic -- never edit it for product work. |
-| `__PRODUCT__-carrier` | `__PRODUCT_ORG__/__PRODUCT__-carrier` | Go | Backend-for-frontend. Owns the product's concepts (`dsl/__PRODUCT__/`), integrations, deploy/release estate, and **generates `@__PRODUCT_ORG__/__PRODUCT__-sdk`** from `core DSL ∪ product DSL`. |
-| `__PRODUCT__-client` | `__PRODUCT_ORG__/__PRODUCT__-client` | React + TS + Vite | The SPA. Talks to the backend **only** through the generated typed SDK (`conn.query.*`, `conn.subscriptions.*`, voice/audio). |
-| `memql-cockpit` | `znasllc-io/memql-cockpit` | Go (TUI) | Terminal-native IDE + ops console for clusters; also the worker runtime (`cockpit worker run`). |
+## How the product composes with the engine
 
-Each repo has a `CLAUDE.md` at its root -- read those for domain detail.
-This guide is the cross-repo map.
+Two mechanisms, both requiring **zero engine edits**:
 
----
-
-## The SDK architecture (read this first)
-
-"The SDK" is **three concerns**, each owned by what it's coupled to:
-
-1. **Generator** (coupled to the DSL grammar) -> lives in **memql**
-   (`sdk/gen`). Walks `.memql` files and emits typed methods. Shared by
-   every carrier.
-2. **Runtime core** `@znasllc-io/memql-sdk-core` (coupled to the
-   `/memql/ws` wire protocol) -> lives in **memql** (`sdk/ts`). The
-   `QueryClient`, `Connection`, subscriptions, voice/audio. Hand-written,
-   client-agnostic.
-3. **Generated typed surface** `@__PRODUCT_ORG__/__PRODUCT__-sdk`
-   (coupled to a concept set) -> produced by the **carrier**
-   (`__PRODUCT__-carrier/sdk/ts`). The `conn.query.queryX({...})` /
-   `mutationX({...})` methods, layered onto the core via TypeScript
-   `declare module` augmentation.
-
-The client depends on `@__PRODUCT_ORG__/__PRODUCT__-sdk`, which re-exports
-the core.
-
-### How the typed surface is generated
-
-`make sdk-gen` in the **carrier** runs the generator over two roots -- the
-core DSL (resolved from the sibling `../memql`) and `dsl/__PRODUCT__` --
-and writes `sdk/ts/src/generated/generated_{queries,mutations,logics,builtins}.ts`.
-Constructs emit a typed method automatically:
-
-- `query` / `mutation` / `logic` -> always emitted.
-- `builtin` (`@executor` Go-backed capabilities) -> emitted **only** if
-  marked `@sdk` (most builtins are internal and stay off the client
-  surface).
-
-memql also generates its own **Go** client (`sdk/go/client`) via its own
-`make sdk-gen`.
-
-### SDK consumption (GitHub Packages)
-
-Both packages publish to **GitHub Packages** (npm.pkg.github.com). The
-client's `.npmrc` maps the `@znasllc-io` and `@__PRODUCT_ORG__` scopes to
-GitHub Packages and authenticates via `NODE_AUTH_TOKEN`; `package.json`
-pins the SDK by version. After a carrier SDK release, bump the pin in the
-client and `npm install`.
-
-For local cross-repo iteration before a publish, the carrier's
-`sdk/ts/dist` can be linked in temporarily -- but the committed state
-always consumes the published package.
-
----
+1. **Runtime DSL delivery.** `deploy/Dockerfile.bundle` packages `dsl/` as a tiny
+   data-only image. The vendored `deploy/k8s/components/dsl-bundle` kustomize
+   component runs it as an init-container that copies the `.memql` tree into a
+   shared volume the product's bff head reads at `MEMQL_DSL_PATH`. A plain engine
+   `bff` image then loads the product DSL with no compiled-in product code
+   (`dsl.MountRuntimeDomainsFromEnv`).
+2. **Two ArgoCD Applications** (NOT a kustomize remote base -- ArgoCD's
+   repo-server can't fetch a private cross-repo base with the Application's
+   credential, and it would couple revisions). The **engine** Application
+   (`memql-local`) owns the mesh; **this repo's** Application (`__PRODUCT__-local`)
+   owns the bff head (`bff-__PRODUCT__`, labelled `memql/product-dsl=true`), the
+   SPA, and the front door. The contract:
+   `memql/docs/public/operate/downstream-stacks.md`.
 
 ## Local setup
 
+Prerequisites: docker, k3d, kubectl, mkcert (`brew install k3d kubectl mkcert`),
+Node >= 20, and the sibling `../memql` checkout (init.sh clones it).
+
 ```bash
-# All repos checked out as siblings in the workspace root
-# (scripts/bootstrap.sh does this for you).
-go work sync                       # Go side
+# THE blessed run path: k3d + ArgoCD, staging parity.
+make up          # engine bring-up + build/import the DSL bundle + SPA + register the product App
+make dev         # rebuild the DSL bundle and re-mount it on the bff (inner loop)
+make status      # product Application + mesh litmus (unique MEMQL_NODE_ID per pod)
+make down        # tear down the whole cluster
 
-# The local stack: k3d + ArgoCD, staging parity (THE blessed run path).
-# Prerequisites: docker, k3d, kubectl, mkcert (brew install k3d kubectl mkcert)
-cd __PRODUCT__-carrier
-make up          # cluster + ArgoCD + secrets + images, wait healthy
-make dev         # inner loop after code changes (single node: make dev NODE=bff)
-make status      # mesh litmus: unique MEMQL_NODE_ID per pod
-make down        # tear down
-
-# The front door serves https://identity.__DOMAIN__ /
-# https://bff.__DOMAIN__ / https://app.__DOMAIN__ (portless TLS,
-# mkcert wildcard). Never use localhost URLs.
-
-# The client dev servers:
-cd ../__PRODUCT__-client && npm install
-make dev
+# The SPA HMR inner loop (attached; localhost:8080, /memql proxied to the bff):
+cd client && npm install && make dev
 ```
 
-Multi-node is the default runtime everywhere: for cross-node mesh work
-use `make up SERVERS=2` + `make scale N=2` in the carrier.
+The front door serves `https://identity.__DOMAIN__`, `https://bff.__DOMAIN__`,
+`https://app.__DOMAIN__` (portless TLS, mkcert wildcard). A private product repo
+needs `MEMQL_K3D_REPO_TOKEN=$(gh auth token)` on `make up` so ArgoCD can read it.
 
----
+## The DSL (the whole product surface)
 
-## The cross-repo change workflow (the important part)
+`dsl/__PRODUCT__/` holds `concepts` / `queries` / `mutations` / `shapes` /
+`tools` / `automations` / `logic`. A **pure-DSL pack** (no product Go) can:
 
-A change to the typed surface usually touches **all three** SDK repos in a
-**strict order**, because the carrier's drift-gate CI checks out memql
-`main`:
+- model concepts (owned-tier authz via `ownerUserId`),
+- write them (mutations) and read them (queries with filters/shapes/sort/paginate),
+- react to graph events (automations firing logic/mutations),
+- expose agent tools via `@handler(type="query", query="query|mutation ...")`.
 
+The ONLY construct that needs Go is a builtin bound to
+`@executor("integration.<name>.<cap>")` (an external call: HTTP, shell). The
+starter deliberately avoids it -- if you need one, that is bespoke Go (a thin
+`bff/` plugin), tracked in
+[memql-project#11](https://github.com/znasllc-io/memql-project/issues/11).
+Prefer DSL first.
+
+**Validate a `.memql` tree locally** (no product Go needed, uses the sibling
+engine clone):
+
+```bash
+cd ../memql && go run ./cmd/memqllint "$OLDPWD/dsl/__PRODUCT__"
 ```
-1. memql        -- change the DSL / generator. `make sdk-gen` to refresh the
-                  Go client. PR -> merge queue -> main.
-2. carrier      -- `make sdk-gen` (now reads the updated memql main),
-                  `make sdk-gen-check` clean. PR -> merge.
-3. client       -- consume the new typed methods. typecheck + build. PR -> merge.
+
+This runs the engine's own load pipeline: parse + import-graph integrity for the
+procedural kinds (query/mutation/logic/automation/spec/trait). It does NOT
+resolve executor names or validate builtin/tool bodies -- a `make up` boot is the
+full check.
+
+## The SDK (client typing)
+
+The production SDK is **`@__PRODUCT_ORG__/__PRODUCT__-sdk`** (GitHub Packages),
+generated by the engine's `sdk-gen` over `core DSL ∪ dsl/__PRODUCT__/`. At stamp
+time it does not exist, so the client shell is **self-contained**: a thin local
+memQL client + a hand-seeded generated concepts module, so
+`npm install && npm run build` pass immediately with no token. Wire the published
+SDK later -- see `client/README.md` "SDK resolution".
+
+## Change routing (the important part)
+
+Before making a change, ask **"would a second product want this?"**
+
+- **Yes** -> it belongs in the **template** (`znasllc-io/memql-project`) or the
+  **engine** (`znasllc-io/memql`), not here. File it there; the engine is
+  read-only for product work (a missing seam is an engine issue -- the template
+  test gates every seam: "could a second product plug in without editing the
+  engine?").
+- **No (product-specific)** -> this repo.
+
+## Staying in sync with the template
+
+Operational files (Makefiles, `scripts/`, CI, `.gitignore`) are byte-identical to
+the template and read `product.env`, so template improvements merge cleanly:
+
+```bash
+git remote add template https://github.com/znasllc-io/memql-project.git
+git fetch template
+git merge template/main --allow-unrelated-histories   # first time only
 ```
 
-**Why the order is non-negotiable:** the carrier's SDK drift-check
-workflow checks out `znasllc-io/memql` at `main` and regenerates. If you
-commit a regenerated carrier SDK whose source DSL isn't on memql `main`
-yet, the gate regenerates a *different* surface and fails. Land memql
-first. Don't open all three PRs at once expecting them to merge together.
-
-### Verify gates per repo
-
-| Repo | Gate |
-|---|---|
-| memql | `go build ./...`, `go test ./...` (incl. the dsl conformance suites), `make sdk-gen-check`. PRs merge via the merge queue; CodeQL (`Analyze (go)`) is required and takes ~3 min. |
-| carrier | `make sdk-gen-check` (drift gate), scan (gitleaks/govulncheck). |
-| client | typecheck + build (`make check`). |
-
----
+Product-owned files (DSL, manifests, docs, client source) are stamped and will
+diverge -- that is expected; keep the plumbing byte-identical.
 
 ## Conventions
 
-- **Branch / PR.** Feature branch -> PR -> merge -> delete branch -> pull
-  main -> prune.
-- **Issues.** Track work with a GitHub issue; land changes via PRs linked
-  to it. Multiple sessions may run against this tree in parallel --
-  assign the issue to yourself before starting.
-- **Staging (memql).** Stage by **explicit path** (`git add <file>`),
-  never `git add -A` -- other sessions' untracked files must not get
-  swept in.
-- **Pre-1.0 everywhere.** No backwards-compat shims, no deprecation
-  windows. When a contract changes, fix both sides at once and delete the
-  old path.
-- **Frontend ping.** A memql or carrier change that alters a wire
-  contract the client depends on must be called out in the commit/PR so
-  it can be relayed to the frontend side.
-- **Ids.** Clients use BARE ids only; canonicalization is server-side
-  (see `memql/docs/public/concepts/identifiers.md`). Never compose,
-  parse, or compare `v1:...`-prefixed ids in client code.
-- **Docs/code tone.** No emojis in code, comments, commit messages, or
-  docs.
-
----
+- **Branch / PR.** Feature branch -> PR -> merge -> delete branch -> pull main.
+- **Stage by explicit path** (`git add <file>`), never `git add -A`.
+- **Pre-1.0 everywhere.** No back-compat shims; when a contract changes, fix both
+  sides at once and delete the old path.
+- **Bare ids.** Clients use bare short slugs; canonicalization is server-side
+  (`memql/docs/public/concepts/identifiers.md`). Never compose/parse/compare
+  `v1:`-prefixed ids in client code.
+- **No emojis** in code, comments, commit messages, or docs.
 
 ## Gotchas
 
-- **The engine repo is read-only for product work.** If a product need
-  seems to require an engine edit, it's a missing seam -- file an engine
-  issue; the template test ("could a second product plug in without
-  editing the engine repo?") gates every seam.
-- **`make sdk-gen` -> "no constructs found" / can't resolve the memql
-  module.** The generator needs the sibling `../memql` (via `replace` /
-  `go.work`). Confirm the checkouts are siblings and `go work sync` has
-  run.
-- **Carrier CI: SDK drift gate red.** The committed
-  `sdk/ts/src/generated` doesn't match what the generator produces from
-  memql `main`. Almost always: you regenerated before the source DSL
-  landed on memql `main`, or you didn't regenerate at all. **Land memql
-  first.**
-- **ArgoCD needs the branch PUSHED.** The local cluster's product
-  Application tracks the carrier repo by URL; ArgoCD cannot read
-  local-only branches. A private carrier repo needs
-  `MEMQL_K3D_REPO_TOKEN=$(gh auth token)` on `make up`.
-- **memql PR stuck at `BLOCKED` with everything green.** CodeQL
-  (`Analyze (go)`) is still running -- required, ~3 min. Poll
-  `gh pr checks <pr>`.
-
----
+- **The engine repo is read-only for product work.** A product need that seems to
+  require an engine edit is a missing seam -- file an engine issue.
+- **ArgoCD needs the branch PUSHED.** The local cluster's product Application
+  tracks this repo by URL; ArgoCD cannot read local-only branches.
+- **`make up` LB ports are fixed at cluster-create.** The first `make up` passes
+  `EXTRA_PORTS`; changing them needs `make down` first.
+- **DSL didn't update after an edit.** Re-run `make dev` -- it rebuilds the bundle
+  image and rolls the deployments labelled `memql/product-dsl=true` so each
+  init-container re-copies the tree.
 
 ## Where to dig deeper
 
-- `memql/CLAUDE.md` -- engine architecture, DSL dependency tree, node
-  types, authoring rules, the gRPC-first endpoint policy.
-- `memql/docs/public/operate/downstream-stacks.md` -- the carrier
-  contract this workspace implements.
-- `memql/docs/public/build/plugin-sdk.md` + `building-a-pack.md` -- the
-  pack extension contract the carrier targets.
-- `__PRODUCT__-carrier/CLAUDE.md` -- product concepts, deploy/release
-  estate.
-- `__PRODUCT__-client/CLAUDE.md` -- SPA architecture and SDK consumption.
+- `CLAUDE.md` -- this repo's agent guide.
+- `client/CLAUDE.md` -- SPA architecture + the bare-ids contract.
+- `memql/docs/public/operate/downstream-stacks.md` -- the downstream contract.
+- `memql/docs/public/build/building-a-pack.md` + `docs/public/language/authoring-rules.md`
+  -- the DSL authoring contract.

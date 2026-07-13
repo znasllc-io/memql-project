@@ -1,0 +1,15 @@
+// shapes.memql -- the __PRODUCT__ product pack (starter). Pure DSL, no Go.
+//
+// One row projection for the greeting reads: every payload field plus the row
+// id and created timestamp. The default shape for myGreetings.
+
+use __PRODUCT__.concepts.{ greeting }
+
+@row
+@description("Full greeting projection: row id + owner + message + created timestamp.")
+shape greeting greetingFull {
+  row.id
+  ownerUserId
+  message
+  row.createdAt
+}

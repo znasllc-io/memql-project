@@ -1,0 +1,36 @@
+# __PRODUCT__ PROD overlay -- same structure as overlays/staging, reconciled by
+# deploy/argocd/apps/__PRODUCT__-prod.yaml. PROD IS A STARTER PLACEHOLDER kept
+# coherent with staging: set prod-specific values (real image digests, prod
+# hostnames, any prod-only env) before pointing an ArgoCD Application at it.
+#
+# Owns ONLY product resources (bff head + SPA + public entry + runtime DSL
+# bundle); the engine mesh is the separate engine Application. OAuth client
+# registration is engine-side (see the staging overlay comment). The product
+# image digests are all-zeros and FAIL CLOSED.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: memql
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: memql
+    includeSelectors: false
+
+resources:
+  - ../../base
+  - public-entry.yaml
+
+components:
+  - ../../components/dsl-bundle
+
+images:
+  - name: memql-bff
+    newName: acrmemql.azurecr.io/memql-bff
+    newTag: __ENGINE_REF__
+  - name: memql-dsl-bundle
+    newName: __REGISTRY__/__PRODUCT__-dsl-bundle
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  - name: __PRODUCT__-client
+    newName: __REGISTRY__/__PRODUCT__-client
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
