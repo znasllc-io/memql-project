@@ -82,8 +82,19 @@ spec:
             - { name: SERVER_ADDRESS, value: "0.0.0.0:8085" }
             - { name: MEMQL_IDENTITY_VERIFIER_BASE_URL, value: "https://identity:8085" }
             - { name: MEMQL_IDENTITY_VERIFIER_AUDIENCE, value: "memql" }
+            # Expected issuer. The base value is the LOCAL issuer -- for a local
+            # stack DOMAIN is the engine's fixed local domain (local.znas.io), so
+            # this resolves to the same issuer the engine's local mesh verifies
+            # against. staging/prod render their own public identity host and so
+            # OVERRIDE this via the overlay's identity-config.yaml patch (a
+            # per-environment patch point; see the overlay activation checklist).
             - { name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER, value: "https://identity.__DOMAIN__" }
-            - { name: MEMQL_IDENTITY_ENABLED, value: "false" }
+            # Authentication is ON in every environment (the engine's own
+            # engine-bff component sets "true" even locally; the engine forbids a
+            # 0 here in staging/prod and alerts on it). The product bff is exposed
+            # by the staging/prod public-entry (app.DOMAIN/memql WS + bff.DOMAIN
+            # raw gRPC), so it must verify tokens like the neutral engine bff.
+            - { name: MEMQL_IDENTITY_ENABLED, value: "true" }
             - { name: MEMQL_HTTP_TLS_CA_FILE, value: "/etc/memql/cacerts/ca.crt" }
             - { name: SSL_CERT_DIR, value: "/etc/ssl/certs:/etc/memql/cacerts" }
             - { name: SERVER_ALLOWED_ORIGINS, value: "*" }

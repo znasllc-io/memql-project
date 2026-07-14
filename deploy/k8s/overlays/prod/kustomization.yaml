@@ -1,12 +1,21 @@
 # __PRODUCT__ PROD overlay -- same structure as overlays/staging, reconciled by
 # deploy/argocd/apps/__PRODUCT__-prod.yaml. PROD IS A STARTER PLACEHOLDER kept
-# coherent with staging: set prod-specific values (real image digests, prod
-# hostnames, any prod-only env) before pointing an ArgoCD Application at it.
+# coherent with staging.
 #
 # Owns ONLY product resources (bff head + SPA + public entry + runtime DSL
 # bundle); the engine mesh is the separate engine Application. OAuth client
 # registration is engine-side (see the staging overlay comment). The product
 # image digests are all-zeros and FAIL CLOSED.
+#
+# ACTIVATION CHECKLIST (same as staging, with prod values) -- complete before
+# pointing an ArgoCD Application here:
+#   1. Set REGISTRY (product.env) + replace the all-zeros image digests below.
+#   2. Set the PROD public hostnames + domain: the app./identity./bff./mcp.
+#      __DOMAIN__ hosts and the ACME `email:` in public-entry.yaml must be the
+#      real prod domain (NOT the local default local.znas.io).
+#   3. Set the token issuer: identity-config.yaml overrides the bff's
+#      MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER to the prod identity host (must
+#      match step 2, or the bff rejects every token). B2.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -23,6 +32,11 @@ resources:
 
 components:
   - ../../components/dsl-bundle
+
+# Per-environment issuer patch point (B2): prod serves identity at its own public
+# host, so override the bff's expected issuer away from the local default.
+patches:
+  - path: identity-config.yaml
 
 images:
   - name: memql-bff

@@ -11,10 +11,19 @@
 # node (MEMQL_IDENTITY_REGISTERED_CLIENTS), which the engine Application owns --
 # not patched here, because this overlay does not render identity.
 #
-# STARTER PLACEHOLDER: the product image digests below are all-zeros and FAIL
-# CLOSED (they only keep the digest-pin gate green; a real sync needs the
-# digests the build server produced). Set REGISTRY (product.env) + the real
-# digests before pointing an Application at this overlay.
+# STARTER PLACEHOLDER -- FAIL CLOSED. This overlay renders coherently for the CI
+# gates but is NOT activation-ready; the single DOMAIN token defaults to the
+# engine's LOCAL domain, so an unedited render targets local.znas.io. Before
+# pointing an ArgoCD Application at this overlay, complete the ACTIVATION
+# CHECKLIST:
+#   1. Set REGISTRY (product.env) and replace the all-zeros image digests below
+#      with the digests the build server produced (they fail closed until then).
+#   2. Set the STAGING public hostnames + domain: the app./identity./bff./mcp.
+#      __DOMAIN__ hosts and the ACME `email:` in public-entry.yaml must be the
+#      real staging domain (NOT the local default local.znas.io).
+#   3. Set the token issuer: identity-config.yaml overrides the bff's
+#      MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER to the staging identity host (it
+#      must match hostname step 2, or the bff rejects every token). B2.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -33,6 +42,11 @@ resources:
 
 components:
   - ../../components/dsl-bundle
+
+# Per-environment issuer patch point (B2): staging serves identity at its own
+# public host, so override the bff's expected issuer away from the local default.
+patches:
+  - path: identity-config.yaml
 
 images:
   # The engine bff image the product bff runs -- pinned by TAG to the engine ref

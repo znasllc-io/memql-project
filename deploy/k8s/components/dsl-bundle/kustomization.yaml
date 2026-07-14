@@ -5,8 +5,13 @@
 # a remote/relative engine path) on purpose: ArgoCD's repo-server renders this
 # product overlay from THIS repo alone -- the same reason the composition uses
 # two ArgoCD Applications instead of a kustomize remote base (see
-# memql/docs/public/operate/downstream-stacks.md). Keep it byte-identical to the
-# engine's copy; re-vendor when the engine's changes.
+# memql/docs/public/operate/downstream-stacks.md).
+#
+# The PATCH BODY below (the volume, init-container, volumeMount, and env ops)
+# must stay identical to the engine's copy -- that is the contract the labelled
+# bff relies on; re-vendor the patch when the engine's changes. This HEADER is
+# vendored-context and deliberately differs from the engine's (it explains why
+# the copy exists here); "identical" is about the patch, not this comment.
 #
 # It adds, to every Deployment labelled `memql/product-dsl: "true"`:
 #   - an emptyDir volume `dsl-bundle`,

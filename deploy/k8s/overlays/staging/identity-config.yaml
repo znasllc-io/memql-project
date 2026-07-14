@@ -1,0 +1,24 @@
+# STAGING identity patch point (B2/C13). A strategic-merge patch that overrides
+# the product bff's expected token issuer for the STAGING public identity host.
+#
+# The base bff.yaml sets MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER to the LOCAL
+# issuer (https://identity.<DOMAIN>, where DOMAIN is the engine's fixed local
+# domain). Staging serves identity at its own public host, so the value below
+# MUST match the staging identity issuer or the bff rejects every token. kustomize
+# merges container env by name, so this replaces only that one variable.
+#
+# PLACEHOLDER -- set to the real staging identity issuer (and align the
+# public-entry.yaml hostnames + ACME email to the same staging domain) before
+# pointing an ArgoCD Application at this overlay.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bff-__PRODUCT__
+spec:
+  template:
+    spec:
+      containers:
+        - name: bff
+          env:
+            - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
+              value: "https://identity.staging.example.com"
