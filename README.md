@@ -91,26 +91,35 @@ conflicts on plumbing.
 | `__PRODUCT__` | product name (lowercase slug) | `acme` |
 | `__PRODUCT_ORG__` | GitHub org/user owning the product repo | `acme-io` |
 | `__DOMAIN__` | engine's fixed local domain (mkcert wildcard); also the staging/prod public-entry placeholder | `local.znas.io` |
-| `__ENGINE_REF__` | engine ref pinned at stamp time (default `main`, see below) | `main` |
+| `__ENGINE_REF__` | engine ref pinned at stamp time (default: latest engine release tag, see below) | `0.12.0` |
 | `__REGISTRY__` | container registry for the product images | `ghcr.io/acme-io` |
 
 The engine org (`znasllc-io`) and the engine registry (`acrmemql.azurecr.io`)
 stay literal. CI greps stamped output for leftover tokens (zero tolerance).
 
-### Why the default engine ref is `main` (temporary)
+### The default engine ref is the latest release
 
-`init.sh` pins `ENGINE_REF=main` by default rather than the latest release tag.
-No tagged engine release yet carries the downstream contract this template needs:
-[`downstream-stacks.md`](https://github.com/znasllc-io/memql/blob/main/docs/public/operate/downstream-stacks.md)
-declares `sinceVersion 0.12.0`, but the newest tag is `0.11.2`, which lacks
-`scripts/k3d/import-image.sh` **and** parses a DSL grammar mutually exclusive with
-`main`'s -- so a tag-pinned stamp lints green yet cannot `make up`. Pinning `main`
-gives a stamp whose grammar + k3d layout match the code the template targets. The
-fixed latest-release-tag resolver is retained in `init.sh` for the flip-back once
-a `>=0.12.0` engine release exists: engine release gap
+`init.sh` pins `ENGINE_REF` to the **latest engine release tag**, resolved over
+the network at stamp time (`resolve_latest_release_tag` reads
+`git ls-remote --tags` of `znasllc-io/memql` and sorts on a `v`-stripped key, so
+a bare `0.12.0` correctly wins over an older `v0.9.6`). The first release that
+carries the downstream contract this template needs -- `scripts/k3d/import-image.sh`,
+the k3d `up.sh` interface, and the current DSL grammar
+([`downstream-stacks.md`](https://github.com/znasllc-io/memql/blob/main/docs/public/operate/downstream-stacks.md)
+`sinceVersion 0.12.0`) -- is `0.12.0`, so a default stamp today pins `0.12.0`.
+
+- Pass `--engine-ref=<tag>` to pin a specific ref instead.
+- Offline, resolution falls back to `main` with a loud warning; the stamp then
+  tracks engine `main` rather than a pinned release, so re-run with
+  `--engine-ref=<tag>` once online to pin one.
+- **To bump an already-stamped product:** edit `ENGINE_REF` in `product.env`
+  **and** the engine image pins under `deploy/k8s/overlays/*`, then re-run CI. A
+  flagless `init.sh` re-run preserves the existing pin -- it never re-resolves.
+
+(History: the default was temporarily `main` while the engine shipped no
+consolidation release -- engine release gap
 [znasllc-io/memql#2510](https://github.com/znasllc-io/memql/issues/2510),
-flip-back [znasllc-io/memql-project#14](https://github.com/znasllc-io/memql-project/issues/14).
-Pass `--engine-ref=<tag>` to pin a specific ref regardless.
+flip-back [znasllc-io/memql-project#14](https://github.com/znasllc-io/memql-project/issues/14).)
 
 ### ArgoCD repo-URL naming invariant
 

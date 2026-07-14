@@ -195,17 +195,19 @@ jobs:
           echo "STAMP_DIR=$stamp_dir" >> "$GITHUB_ENV"
       - name: memqllint the stamped DSL at the STAMPED engine ref (B4)
         # The instance PINS an engine ref in product.env (ENGINE_REF); a stamped
-        # tree is only meaningful against THAT ref, never engine main. Reading the
-        # ref here (mirroring ci.yml's dsl lane) is what proves a default stamp is
-        # self-consistent -- and is precisely the gate that would have caught B3.
+        # tree is only meaningful against THAT ref, never engine main. init.sh now
+        # defaults ENGINE_REF to the latest engine RELEASE tag (memql-project#14),
+        # so a default stamp pins a release and this gate lints against it. The stamp
+        # step ALWAYS writes product.env, so a missing pin is a stamp failure -- fail
+        # loudly rather than silently defaulting to main. Mirrors ci.yml's dsl lane;
+        # this is the gate that would have caught B3.
         run: |
           set -euo pipefail
-          ref=main
-          if [ -f "$STAMP_DIR/product.env" ]; then
-            # shellcheck disable=SC1091
-            . "$STAMP_DIR/product.env"
-            [ -n "${ENGINE_REF:-}" ] && ref="$ENGINE_REF"
-          fi
+          [ -f "$STAMP_DIR/product.env" ] || { echo "ERROR: stamp wrote no product.env" >&2; exit 1; }
+          # shellcheck disable=SC1091
+          . "$STAMP_DIR/product.env"
+          ref="${ENGINE_REF:-}"
+          [ -n "$ref" ] || { echo "ERROR: stamped product.env has no ENGINE_REF pin" >&2; exit 1; }
           echo "linting the stamped DSL against engine ref: $ref"
           git clone --depth 1 --branch "$ref" https://github.com/znasllc-io/memql.git /tmp/memql \
             || { echo "ERROR: failed to clone engine at pinned ref '$ref'" >&2; exit 1; }
