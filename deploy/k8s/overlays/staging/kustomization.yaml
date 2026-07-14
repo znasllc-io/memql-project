@@ -24,6 +24,11 @@
 #   3. Set the token issuer: identity-config.yaml overrides the bff's
 #      MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER to the staging identity host (it
 #      must match hostname step 2, or the bff rejects every token). B2.
+#   4. Verify the ArgoCD repoURL: deploy/argocd/apps/__PRODUCT__-staging.yaml +
+#      project.yaml bake `https://github.com/__PRODUCT_ORG__/__PRODUCT__.git`,
+#      which assumes the GitHub repo is named exactly <product>. If your repo has
+#      a different name, fix repoURL in both files (and the project sourceRepos)
+#      or ArgoCD will track a repo that does not exist (C12).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 

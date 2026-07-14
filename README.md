@@ -86,11 +86,36 @@ conflicts on plumbing.
 | `__PRODUCT__` | product name (lowercase slug) | `acme` |
 | `__PRODUCT_ORG__` | GitHub org/user owning the product repo | `acme-io` |
 | `__DOMAIN__` | engine's fixed local domain (mkcert wildcard); also the staging/prod public-entry placeholder | `local.znas.io` |
-| `__ENGINE_REF__` | engine ref pinned at stamp time | `v0.12.4` |
+| `__ENGINE_REF__` | engine ref pinned at stamp time (default `main`, see below) | `main` |
 | `__REGISTRY__` | container registry for the product images | `ghcr.io/acme-io` |
 
 The engine org (`znasllc-io`) and the engine registry (`acrmemql.azurecr.io`)
 stay literal. CI greps stamped output for leftover tokens (zero tolerance).
+
+### Why the default engine ref is `main` (temporary)
+
+`init.sh` pins `ENGINE_REF=main` by default rather than the latest release tag.
+No tagged engine release yet carries the downstream contract this template needs:
+[`downstream-stacks.md`](https://github.com/znasllc-io/memql/blob/main/docs/public/operate/downstream-stacks.md)
+declares `sinceVersion 0.12.0`, but the newest tag is `0.11.2`, which lacks
+`scripts/k3d/import-image.sh` **and** parses a DSL grammar mutually exclusive with
+`main`'s -- so a tag-pinned stamp lints green yet cannot `make up`. Pinning `main`
+gives a stamp whose grammar + k3d layout match the code the template targets. The
+fixed latest-release-tag resolver is retained in `init.sh` for the flip-back once
+a `>=0.12.0` engine release exists: engine release gap
+[znasllc-io/memql#2510](https://github.com/znasllc-io/memql/issues/2510),
+flip-back [znasllc-io/memql-project#14](https://github.com/znasllc-io/memql-project/issues/14).
+Pass `--engine-ref=<tag>` to pin a specific ref regardless.
+
+### ArgoCD repo-URL naming invariant
+
+The staging/prod ArgoCD manifests (`deploy/argocd/apps/*` + `project.yaml`) bake
+`https://github.com/<product-org>/<product>.git` -- i.e. they assume your GitHub
+repo is named **exactly `<product>`**. The local `make up` sidesteps this by
+deriving the repo URL from your `origin` remote, but the committed ArgoCD
+manifests cannot. If your repo has a different name, fix `repoURL` in both app
+files and the project `sourceRepos` before activating staging/prod (called out in
+each overlay's activation checklist).
 
 ## Staying in sync with the template (for stamped products)
 
