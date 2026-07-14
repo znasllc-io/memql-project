@@ -122,6 +122,31 @@ git fetch template
 git merge template/main --allow-unrelated-histories   # first time only
 ```
 
+**Re-prune after the first sync.** `--allow-unrelated-histories` merges the
+template's *pre-stamp* tree, which RESURRECTS everything `init.sh` renamed or
+pruned: the template's **placeholder DSL directory** (the template ships `dsl/`
+under its product-token name -- `git status` shows it next to your real
+`dsl/__PRODUCT__/`), `.github/workflows/template-ci.yml`, `product.env.example`,
+and the template's **placeholder ArgoCD app manifests** under
+`deploy/argocd/apps/` (the two `*-staging.yaml` / `*-prod.yaml` files under the
+token name, alongside your stamped `__PRODUCT__-staging.yaml` /
+`__PRODUCT__-prod.yaml`). Delete the resurrected placeholders (keep your own
+stamped paths) and commit:
+
+```bash
+git status                                     # lists the resurrected pre-stamp artifacts
+git rm .github/workflows/template-ci.yml product.env.example
+git rm -r <the resurrected placeholder DSL dir>          # NOT your dsl/__PRODUCT__/
+git rm <the resurrected placeholder deploy/argocd/apps/*.yaml files>
+git commit -m "chore: re-prune template artifacts after first template sync"
+```
+
+Runtime is safe even before you re-prune -- the engine skips `_`-prefixed DSL
+domains, so the resurrected placeholder DSL dir never loads -- but leaving them
+around is confusing. Later syncs are ordinary merges (no
+`--allow-unrelated-histories`); expect **modify/delete conflicts** on those same
+paths -- resolve them by keeping them deleted (`git rm` the path).
+
 Product-owned files (DSL, manifests, docs, client source) are stamped and will
 diverge -- that is expected; keep the plumbing byte-identical.
 

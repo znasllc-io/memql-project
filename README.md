@@ -48,6 +48,14 @@ product boots a full stack with zero engine-repo edits.**
    empty = local-only), `--engine-ref=...` to pin the engine, `--skip-clones`
    to skip the sibling clones, `--dry-run` to preview with zero mutation.
 
+   Leave `--domain` at its default: the local stack's identity, front door,
+   mkcert cert, and token issuer are all **engine-owned and fixed at the
+   engine's local domain** (`local.znas.io`), so a custom local domain has
+   nothing serving `identity.<domain>` (magic-link login impossible, TLS
+   mismatched, the bff rejects every token). `DOMAIN` matters for the
+   **staging/prod public entries**, which you set on the overlays at activation
+   time (see each overlay's activation checklist) -- not per local stamp.
+
 3. Bring up the stack (requires docker, k3d, kubectl, mkcert, and the sibling
    `../memql`):
 
@@ -77,7 +85,7 @@ conflicts on plumbing.
 |---|---|---|
 | `__PRODUCT__` | product name (lowercase slug) | `acme` |
 | `__PRODUCT_ORG__` | GitHub org/user owning the product repo | `acme-io` |
-| `__DOMAIN__` | local front-door domain (mkcert wildcard) | `local.znas.io` |
+| `__DOMAIN__` | engine's fixed local domain (mkcert wildcard); also the staging/prod public-entry placeholder | `local.znas.io` |
 | `__ENGINE_REF__` | engine ref pinned at stamp time | `v0.12.4` |
 | `__REGISTRY__` | container registry for the product images | `ghcr.io/acme-io` |
 
@@ -95,6 +103,14 @@ git fetch template
 git merge template/main --allow-unrelated-histories   # first time only
 ```
 
+The first `--allow-unrelated-histories` merge pulls the template's **pre-stamp**
+tree, so it resurrects what `init.sh` pruned/renamed (`dsl/__PRODUCT__/`,
+`template-ci.yml`, `product.env.example`, `deploy/argocd/apps/__PRODUCT__-*.yaml`).
+Re-prune them and commit after the first sync (runtime is safe meanwhile -- the
+engine skips `_`-prefixed DSL domains). Later syncs are ordinary merges; expect
+modify/delete conflicts on those paths and resolve by keeping them deleted. See
+`ONBOARDING.md` "Staying in sync with the template" for the exact commands.
+
 Route changes by asking "would a second product want this?" -> the template or
 the engine; product-specific -> the product repo.
 
@@ -111,6 +127,16 @@ the engine; product-specific -> the product repo.
 | `ONBOARDING.md` / `CLAUDE.md` | dev guide + agent guide the stamp personalizes |
 | `.github/workflows/` | `template-ci.yml` (template-only), `ci.yml` (product CI), `gitleaks.yml` |
 
-Note: two stamped products default to the same `__DOMAIN__` front-door
-hostnames, so run one local stack at a time or stamp each with its own
-`--domain`.
+### Running two products locally
+
+All local products share the engine's fixed local domain (`local.znas.io`) --
+identity/TLS/issuer are engine-owned, so a per-product `--domain` is **not** the
+isolation knob (a custom local domain breaks login, see the Quickstart note).
+Isolate by cluster + Application instead, not by domain:
+
+- Run one local stack at a time (simplest): `make down` one, `make up` the next.
+- Or give each its own k3d cluster and LB ports: `make up CLUSTER=acme
+  EXTRA_PORTS=50051:50051` for one, `make up CLUSTER=beta EXTRA_PORTS=50052:50051`
+  for the other. Each product registers its own ArgoCD Application
+  (`<product>-local`), and `CLUSTER`/`EXTRA_PORTS` keep the two stacks on
+  separate clusters and host ports -- same local domain, no collision.
