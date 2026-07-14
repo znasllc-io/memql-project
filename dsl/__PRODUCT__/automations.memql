@@ -8,11 +8,18 @@
 // (@trigger(event="node.created", concept="v1:<core>:<concept>", ...)) to react
 // to the engine's own rows -- the core has no knowledge of the pack.
 //
-// The step calls onGreetingCreated (logic.memql), which reads the owner's
-// greetings via the owned query. This exercises the full
-// event -> automation -> logic -> query path on a plain engine with no product
-// code. Note the trigger names the concept by its canonical id STRING; that is
-// not a DSL import, so no `use` of the concept is needed here.
+// The step calls onGreetingCreated (logic.memql) with the triggering node bound
+// as `event`. That body reads the greetings owned by the NEW greeting's owner --
+// passing the owner id from event.payload.ownerUserId, because an automation
+// runs under a SYSTEM actor (so actor.userId is NOT the owner). This exercises
+// the full event -> automation -> logic -> query path on a plain engine with no
+// product code. The trigger names the concept by its canonical id STRING; that
+// is not a DSL import, so no `use` of the concept is needed here.
+//
+// The step passes the event to the logic with a brace-block arg
+// (`logic <name> { event: event }`) and references the logic by its bare,
+// un-prefixed name (resolved through the file-top `use`) -- the canonical
+// automation-step grammar (see the engine's authoring-rules.md).
 
 use __PRODUCT__.logic.{ onGreetingCreated }
 
@@ -21,6 +28,6 @@ use __PRODUCT__.logic.{ onGreetingCreated }
 @description("On creation of a greeting, run the pure-DSL onGreetingCreated logic. Demonstrates a pack automation firing on a graph event with zero product Go.")
 automation greetOnGreetingCreate {
   step react {
-    logic onGreetingCreated ( event: event )
+    logic onGreetingCreated { event: event }
   }
 }
