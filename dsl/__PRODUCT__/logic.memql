@@ -1,0 +1,31 @@
+// logic.memql -- the __PRODUCT__ product pack (starter). Pure DSL, no Go.
+//
+// The callable body the greetOnGreetingCreate automation runs on a graph event.
+// An automation runs under a SYSTEM actor, so the OWNED myGreetings query (gated
+// on ownerUserId==actor.userId) would match ZERO rows here -- instead this body
+// reads the NEW greeting's owner's greetings by passing the owner id straight
+// from the event payload (event.payload.ownerUserId, the field the createGreeting
+// mutation stamped) into the owner-parameterized greetingsForOwner query. This
+// exercises the event -> automation -> logic -> query path with ZERO product Go
+// and no integration executor, and returns REAL rows (the just-created greeting
+// is in the result).
+//
+// A logic body invokes a query/mutation by its bare name with NAMED args
+// (`greetingsForOwner(ownerUserId: ...)`, empty = `name()`) and reads the event
+// as `args.event.payload.*` -- the canonical grammar (see the engine's
+// authoring-rules.md + examples/deploypack; object-literal `name({...})` args
+// are retired). A real product often writes a row or calls an
+// integration.<name>.* capability here; the latter needs a thin bff plugin
+// (bespoke Go), tracked in memql-project#11. Prefer pure DSL first.
+
+use __PRODUCT__.queries.{ greetingsForOwner }
+
+@description("Pure-DSL reaction to a greeting-created event: reads the greetings owned by the new greeting's owner (owner id taken from event.payload.ownerUserId, since an automation's actor is the system, not the owner). Demonstrates a zero-Go automation body that returns real rows.")
+logic onGreetingCreated {
+  args {
+    event  object  @required
+  }
+  body {
+    return greetingsForOwner(ownerUserId: args.event.payload.ownerUserId)
+  }
+}

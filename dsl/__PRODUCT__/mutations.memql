@@ -1,0 +1,23 @@
+// mutations.memql -- the __PRODUCT__ product pack (starter). Pure DSL, no Go.
+//
+// One owned-tier write executed by the ENGINE's own struct-mutation executor --
+// zero product Go, no integration executor. createGreeting stamps ownerUserId
+// from actor.userId server-side (a caller can only ever create their own
+// greeting) and takes the message text; the caller mints a fresh greetingId.
+// Grow this file with the product's own mutations.
+
+use __PRODUCT__.concepts.{ greeting }
+
+@enabled
+@description("Create a greeting for the caller. Owned: ownerUserId is stamped from actor.userId, so a caller can only ever create their own greeting. message is required; the caller mints a fresh greetingId.")
+mutate greeting createGreeting {
+  args {
+    greetingId  string  @required
+    message     string  @required
+  }
+  insert {
+    id: args.greetingId
+    ownerUserId: actor.userId
+    args.message
+  }
+}

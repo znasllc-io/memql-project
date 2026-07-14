@@ -1,0 +1,36 @@
+# AppProject scoping the __PRODUCT__ product's GitOps surface. It scopes the
+# LOCAL cluster's product Application (deploy/k8s/overlays/local -- the bff head +
+# SPA), applied by the root `make up` via the engine's up.sh
+# (--project-manifest), and the STAGING/PROD Applications
+# (apps/__PRODUCT__-{staging,prod}.yaml).
+#
+# The engine's own `memql` AppProject allowlists only the engine repo in
+# sourceRepos, so this downstream stack needs its own project allowlisting the
+# product repo. up.sh enforces this: a non-default --app-project requires
+# --project-manifest. See memql/docs/public/operate/downstream-stacks.md.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: __PRODUCT__
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: __PRODUCT__ product resources (bff head + SPA + public entry) layered on the memql engine mesh
+  sourceRepos:
+    - https://github.com/__PRODUCT_ORG__/__PRODUCT__.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: memql
+    # The Application objects surface.
+    - server: https://kubernetes.default.svc
+      namespace: argocd
+  # Cluster-scoped resources the overlays legitimately own: the public-entry
+  # cert-manager ClusterIssuer (staging/prod). The memql Namespace is created by
+  # the engine Application.
+  clusterResourceWhitelist:
+    - group: cert-manager.io
+      kind: ClusterIssuer
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'

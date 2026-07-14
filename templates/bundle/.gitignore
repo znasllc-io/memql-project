@@ -1,6 +1,0 @@
-# DSL-first product: no Go build artifacts in the common case.
-bin/
-*.local
-.env
-node_modules/
-dist/

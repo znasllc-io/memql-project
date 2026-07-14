@@ -1,0 +1,13 @@
+# Product-owned resources for __PRODUCT__ (the DSL-first stack): the bff head
+# (bff-__PRODUCT__, which mounts the product DSL bundle) + the SPA. This base
+# owns ONLY what the product Application reconciles -- the engine mesh
+# (identity/cognition/voice/agent/planner/workbench/mcp + the neutral bff) is a
+# SEPARATE ArgoCD Application from the engine repo (two Applications, not a
+# kustomize remote base; see downstream-stacks.md). The dsl-bundle component and
+# the per-environment ingress + image pins live in the overlays.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - bff.yaml
+  - app.yaml

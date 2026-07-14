@@ -23,8 +23,8 @@ permissions:
 # Installs the gitleaks binary directly from go install rather than using
 # `gitleaks/gitleaks-action`, whose v2 release requires a paid license for
 # any private repo in an org. The CLI is free everywhere; we use the same
-# workflow shape across memql, memql-cockpit, memql-project, and the product carrier repo for
-# consistency.
+# workflow shape across memql, memql-cockpit, and memql-project (and the
+# products it stamps) for consistency.
 #
 # Two scan modes (Tier 0, #855):
 #   - Pull requests run a FAST working-tree scan (`gitleaks dir .`) on a

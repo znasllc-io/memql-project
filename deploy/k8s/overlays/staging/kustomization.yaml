@@ -1,0 +1,71 @@
+# __PRODUCT__ STAGING overlay -- the product Application reconciled by
+# deploy/argocd/apps/__PRODUCT__-staging.yaml. It owns ONLY product resources:
+# the bff head + SPA (../../base), the runtime DSL bundle (the vendored
+# dsl-bundle component), and the public nginx/cert-manager entry. The engine
+# mesh (identity/voice/mcp/cognition/agent/planner/workbench + the neutral bff)
+# is the SEPARATE engine Application (two Applications, not a kustomize remote
+# base; see downstream-stacks.md).
+#
+# OAuth client registration: the SPA's client_id + redirect URI
+# (https://app.__DOMAIN__/auth/callback) are registered on the ENGINE identity
+# node (MEMQL_IDENTITY_REGISTERED_CLIENTS), which the engine Application owns --
+# not patched here, because this overlay does not render identity.
+#
+# STARTER PLACEHOLDER -- FAIL CLOSED. This overlay renders coherently for the CI
+# gates but is NOT activation-ready; the single DOMAIN token defaults to the
+# engine's LOCAL domain, so an unedited render targets local.znas.io. Before
+# pointing an ArgoCD Application at this overlay, complete the ACTIVATION
+# CHECKLIST:
+#   1. Set REGISTRY (product.env) and replace the all-zeros image digests below
+#      with the digests the build server produced (they fail closed until then).
+#   2. Set the STAGING public hostnames + domain: the app./identity./bff./mcp.
+#      __DOMAIN__ hosts and the ACME `email:` in public-entry.yaml must be the
+#      real staging domain (NOT the local default local.znas.io).
+#   3. Set the token issuer: identity-config.yaml overrides the bff's
+#      MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER to the staging identity host (it
+#      must match hostname step 2, or the bff rejects every token). B2.
+#   4. Verify the ArgoCD repoURL: deploy/argocd/apps/__PRODUCT__-staging.yaml +
+#      project.yaml bake `https://github.com/__PRODUCT_ORG__/__PRODUCT__.git`,
+#      which assumes the GitHub repo is named exactly <product>. If your repo has
+#      a different name, fix repoURL in both files (and the project sourceRepos)
+#      or ArgoCD will track a repo that does not exist (C12).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: memql
+
+# Reapply the engine part-of label so the public-entry resources (which carry
+# no inline part-of label) join the product's resource set. Idempotent.
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: memql
+    includeSelectors: false
+
+resources:
+  - ../../base
+  - public-entry.yaml
+
+components:
+  - ../../components/dsl-bundle
+
+# Per-environment issuer patch point (B2): staging serves identity at its own
+# public host, so override the bff's expected issuer away from the local default.
+patches:
+  - path: identity-config.yaml
+
+images:
+  # The engine bff image the product bff runs -- pinned by TAG to the engine ref
+  # this product ships against (a release = {engine ref, bundle digest, client
+  # digest}). acrmemql.azurecr.io is the engine registry (stays literal, like
+  # the znasllc-io org).
+  - name: memql-bff
+    newName: acrmemql.azurecr.io/memql-bff
+    newTag: __ENGINE_REF__
+  # The product's DSL bundle -- digest-pinned in the product registry.
+  - name: memql-dsl-bundle
+    newName: __REGISTRY__/__PRODUCT__-dsl-bundle
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  # The product SPA -- digest-pinned in the product registry.
+  - name: __PRODUCT__-client
+    newName: __REGISTRY__/__PRODUCT__-client
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000

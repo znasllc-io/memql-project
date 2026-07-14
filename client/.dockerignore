@@ -1,0 +1,21 @@
+# Build-context exclusions for the client image (client/Dockerfile).
+#
+# The Dockerfile does `COPY . .` after `npm install` in a fresh linux node
+# builder. Without this file the host's node_modules (built for the host OS/arch,
+# e.g. a macOS/arm64 esbuild binary) overlays the image's freshly-installed
+# linux modules, breaking `vite build` with an esbuild host/binary mismatch; and
+# a gitignored .env would be copied into the builder layers. Keep this list in
+# sync with client/.gitignore's build artifacts (C10).
+node_modules
+dist
+.env
+.env.*
+*.local
+
+# VCS / editor / OS noise -- never needed in the image
+.git
+.gitignore
+.DS_Store
+.idea
+.vscode
+npm-debug.log*

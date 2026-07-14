@@ -1,0 +1,64 @@
+# Reusable kustomize Component: runtime product-DSL bundle delivery.
+#
+# VENDORED from znasllc-io/memql `deploy/k8s/components/dsl-bundle/` (platform
+# consolidation memql#2472 Step 2 / #2484). It is copied here (not referenced as
+# a remote/relative engine path) on purpose: ArgoCD's repo-server renders this
+# product overlay from THIS repo alone -- the same reason the composition uses
+# two ArgoCD Applications instead of a kustomize remote base (see
+# memql/docs/public/operate/downstream-stacks.md).
+#
+# The PATCH BODY below (the volume, init-container, volumeMount, and env ops)
+# must stay identical to the engine's copy -- that is the contract the labelled
+# bff relies on; re-vendor the patch when the engine's changes. This HEADER is
+# vendored-context and deliberately differs from the engine's (it explains why
+# the copy exists here); "identical" is about the patch, not this comment.
+#
+# It adds, to every Deployment labelled `memql/product-dsl: "true"`:
+#   - an emptyDir volume `dsl-bundle`,
+#   - an init-container `dsl-bundle-copy` that copies the product's `.memql`
+#     tree out of the DSL-bundle image into that volume, and
+#   - a `MEMQL_DSL_PATH=/var/lib/memql/dsl` env + volumeMount on the engine
+#     container (index 0),
+# so a plain engine image loads the product DSL at boot with zero compiled-in
+# product code (dsl.MountRuntimeDomainsFromEnv).
+#
+# The bundle image the init-container runs is the placeholder `memql-dsl-bundle`;
+# each overlay retargets it via its `images:` block (local -> a k3d-imported
+# `<product>-dsl-bundle:local`, staging/prod -> a digest-pinned registry image).
+#
+# The `op: add /spec/template/spec/initContainers` sets the WHOLE array, so the
+# labelled Deployment MUST NOT declare any other initContainers (the product bff
+# has none).
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+patches:
+  - target:
+      kind: Deployment
+      labelSelector: memql/product-dsl=true
+    patch: |
+      - op: add
+        path: /spec/template/spec/volumes/-
+        value:
+          name: dsl-bundle
+          emptyDir: {}
+      - op: add
+        path: /spec/template/spec/initContainers
+        value:
+          - name: dsl-bundle-copy
+            image: memql-dsl-bundle:latest
+            imagePullPolicy: IfNotPresent
+            command: ["sh", "-c", "cp -a /bundle/. /var/lib/memql/dsl/"]
+            volumeMounts:
+              - name: dsl-bundle
+                mountPath: /var/lib/memql/dsl
+      - op: add
+        path: /spec/template/spec/containers/0/volumeMounts/-
+        value:
+          name: dsl-bundle
+          mountPath: /var/lib/memql/dsl
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: MEMQL_DSL_PATH
+          value: /var/lib/memql/dsl

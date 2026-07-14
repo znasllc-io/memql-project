@@ -1,0 +1,35 @@
+// queries.memql -- the __PRODUCT__ product pack (starter). Pure DSL, no Go.
+//
+// Two engine-executed reads over the pack's own greeting concept:
+//   - myGreetings: the OWNED client read. The row set is gated by
+//     ownerUserId==actor.userId server-side, so a caller only ever sees their
+//     own greetings and no arg widens that set. The client + the ListGreetings
+//     tool call this one.
+//   - greetingsForOwner: an owner-parameterized read used by the
+//     greetOnGreetingCreate automation, which runs under a SYSTEM actor (so
+//     actor.userId is not the greeting's owner -- it must pass the owner id from
+//     the event payload). NOT surfaced as a tool (it takes an explicit owner).
+// Grow this file with the product's own queries.
+
+use __PRODUCT__.concepts.{ greeting }
+
+@enabled
+@description("List the caller's greetings, newest first. Owned: the row set is gated by ownerUserId==actor.userId server-side, so cross-user reads are impossible.")
+query greeting myGreetings {
+  filter   ownerUserId==actor.userId
+  sort     "createdAt", "desc"
+  paginate 50
+  shape    greetingFull
+}
+
+@enabled
+@description("List the greetings owned by a given user, newest first. Used by the greetOnGreetingCreate automation, which runs under a system actor and passes the owner id from event.payload.ownerUserId rather than relying on actor.userId. Not surfaced as a tool (it takes an explicit owner arg).")
+query greeting greetingsForOwner {
+  args {
+    ownerUserId  string  @required
+  }
+  filter   ownerUserId==args.ownerUserId
+  sort     "createdAt", "desc"
+  paginate 50
+  shape    greetingFull
+}

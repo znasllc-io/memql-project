@@ -1,0 +1,63 @@
+# __PRODUCT__ -- the product frontend (SPA), served in-cluster.
+#
+# The starter client image (client/Dockerfile) is a static server: `serve -s
+# dist -l 8080` serves the built Vite bundle. The browser-facing config
+# (VITE_MEMQL_HTTP_URL, VITE_IDENTITY_BASE_URL) is baked at build time, so the
+# running container needs no runtime env. The overlays pin the image (local ->
+# a k3d-imported `__PRODUCT__-client:local`, staging/prod -> a digest-pinned
+# registry image). The front door routes `/` here and `/memql` to bff-__PRODUCT__.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: __PRODUCT__
+  labels:
+    app.kubernetes.io/name: __PRODUCT__
+    app.kubernetes.io/part-of: memql
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: __PRODUCT__
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: __PRODUCT__
+        app.kubernetes.io/part-of: memql
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: __PRODUCT__
+          image: __PRODUCT__-client # pinned by the overlay images: transformer
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8080 }
+          readinessProbe:
+            httpGet: { path: /, port: 8080 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /, port: 8080 }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: __PRODUCT__
+  labels:
+    app.kubernetes.io/name: __PRODUCT__
+    app.kubernetes.io/part-of: memql
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: __PRODUCT__
+  ports:
+    - { name: http, port: 8080, targetPort: 8080 }
