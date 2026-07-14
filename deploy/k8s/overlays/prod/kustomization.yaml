@@ -13,9 +13,12 @@
 #   2. Set the PROD public hostnames + domain: the app./identity./bff./mcp.
 #      __DOMAIN__ hosts and the ACME `email:` in public-entry.yaml must be the
 #      real prod domain (NOT the local default local.znas.io).
-#   3. Set the token issuer: identity-config.yaml overrides the bff's
-#      MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER to the prod identity host (must
-#      match step 2, or the bff rejects every token). B2.
+#   3. Set the token issuer + CORS origin: identity-config.yaml overrides the
+#      bff's MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER to the prod identity host and
+#      SERVER_ALLOWED_ORIGINS to the prod app host (https://app.<domain>). Both
+#      must match the hostnames from step 2, or the bff rejects every token /
+#      blocks the SPA's cross-origin calls. NEVER wildcard the CORS origin -- the
+#      bff is a credentialed API. B2.
 #   4. Verify the ArgoCD repoURL: deploy/argocd/apps/__PRODUCT__-prod.yaml +
 #      project.yaml bake `https://github.com/__PRODUCT_ORG__/__PRODUCT__.git`,
 #      which assumes the GitHub repo is named exactly <product>. If your repo has

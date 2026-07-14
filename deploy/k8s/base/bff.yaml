@@ -97,7 +97,15 @@ spec:
             - { name: MEMQL_IDENTITY_ENABLED, value: "true" }
             - { name: MEMQL_HTTP_TLS_CA_FILE, value: "/etc/memql/cacerts/ca.crt" }
             - { name: SSL_CERT_DIR, value: "/etc/ssl/certs:/etc/memql/cacerts" }
-            - { name: SERVER_ALLOWED_ORIGINS, value: "*" }
+            # CORS allow-list for the product bff's HTTP/WS surface. NEVER "*": the
+            # bff is a CREDENTIALED API (it carries user bearer tokens), so a
+            # wildcard origin lets any site drive it with the user's session. The
+            # base value is the LOCAL front-door origin (app.DOMAIN, where DOMAIN is
+            # the engine's fixed local domain). staging/prod serve the SPA at their
+            # own public host and so OVERRIDE this via the overlay's
+            # identity-config.yaml patch -- the same per-environment patch point as
+            # the issuer above (see the overlay activation checklist).
+            - { name: SERVER_ALLOWED_ORIGINS, value: "https://app.__DOMAIN__" }
             # Shared DB -- migrations run once on the engine identity node.
             - { name: MEMORY_NODES_DATABASE_MIGRATE_ON_START, value: "false" }
           volumeMounts:

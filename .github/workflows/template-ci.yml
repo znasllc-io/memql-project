@@ -133,6 +133,23 @@ jobs:
             [ "$v" = "true" ] || { echo "ERROR: $o renders MEMQL_IDENTITY_ENABLED=$v (want true)" >&2; exit 1; }
           done
 
+      - name: product bff CORS origin is concrete, never wildcard (#16)
+        # SERVER_ALLOWED_ORIGINS must never render "*" on the credentialed product
+        # bff (it carries user bearer tokens). Base renders the LOCAL front-door
+        # origin (https://app.<domain>); staging/prod OVERRIDE it to their public
+        # app host via identity-config.yaml. Assert EVERY overlay renders a
+        # concrete, non-empty, non-wildcard origin -- the CORS half of #16.
+        run: |
+          set -euo pipefail
+          for o in local staging prod; do
+            kubectl kustomize "$STAMP_DIR/deploy/k8s/overlays/$o" > "/tmp/cors-$o.yaml"
+            v="$(grep -A1 'name: SERVER_ALLOWED_ORIGINS' "/tmp/cors-$o.yaml" | grep -m1 'value:' | sed 's/.*value: *//; s/"//g')"
+            case "$v" in
+              ""|"*") echo "ERROR: $o renders SERVER_ALLOWED_ORIGINS='$v' (want a concrete non-wildcard origin)" >&2; exit 1 ;;
+            esac
+            echo "$o: SERVER_ALLOWED_ORIGINS=$v"
+          done
+
       - name: client npm install + typecheck + build + lint (stamped, self-contained)
         working-directory: ${{ env.STAMP_DIR }}/client
         run: |

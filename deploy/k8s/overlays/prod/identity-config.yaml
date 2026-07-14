@@ -1,13 +1,17 @@
 # PROD identity patch point (B2/C13). A strategic-merge patch that overrides the
-# product bff's expected token issuer for the PROD public identity host.
+# product bff's per-environment public hosts for PROD: the expected token issuer
+# AND the CORS allow-list origin.
 #
-# The base bff.yaml sets MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER to the LOCAL
-# issuer (https://identity.<DOMAIN>, where DOMAIN is the engine's fixed local
-# domain). Prod serves identity at its own public host, so the value below MUST
-# match the prod identity issuer or the bff rejects every token. kustomize merges
-# container env by name, so this replaces only that one variable.
+# The base bff.yaml sets these to the LOCAL values (https://identity.<DOMAIN> and
+# https://app.<DOMAIN>, where DOMAIN is the engine's fixed local domain). Prod
+# serves identity + the SPA at its own public hosts, so the values below MUST
+# match the prod identity issuer and the prod app origin, or the bff rejects
+# every token / blocks the SPA's cross-origin calls. kustomize merges container
+# env by name, so this replaces only those two variables.
 #
-# PLACEHOLDER -- set to the real prod identity issuer (and align the
+# NEVER wildcard SERVER_ALLOWED_ORIGINS -- the bff is a credentialed API.
+#
+# PLACEHOLDER -- set to the real prod identity issuer + app origin (and align the
 # public-entry.yaml hostnames + ACME email to the same prod domain) before
 # pointing an ArgoCD Application at this overlay.
 apiVersion: apps/v1
@@ -22,3 +26,5 @@ spec:
           env:
             - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
               value: "https://identity.example.com"
+            - name: SERVER_ALLOWED_ORIGINS
+              value: "https://app.example.com"
