@@ -9,6 +9,11 @@
 // regenerate the full authoritative set from dsl/ and import these from the SDK
 // instead.
 //
+// IDENTIFIER SAFETY: the object KEYS below use __PRODUCT_ID__ (the product name
+// with hyphens mapped to underscores) so a hyphenated product (e.g. demo-app)
+// stamps a valid TS identifier (demo_app_GREETING), while the canonical `v1:`
+// string VALUES keep __PRODUCT__ (a `v1:demo-app:greeting` namespace is fine).
+//
 // THIS IS THE ONE PLACE canonical `v1:` ids may appear -- they are the DSL
 // source of truth, machine-generated. Everywhere else in the app, refer to a
 // concept THROUGH these constants; never hand-write a `v1:`-prefixed string or
@@ -20,7 +25,7 @@ export const Concepts = {
   COGNITION_SPACE: "v1:cognition:space",
   COGNITION_PARTICIPANT: "v1:cognition:participant",
   IDENTITY_USER: "v1:identity:user",
-  __PRODUCT___GREETING: "v1:__PRODUCT__:greeting",
+  __PRODUCT_ID___GREETING: "v1:__PRODUCT__:greeting",
 } as const;
 export type ConceptKey = keyof typeof Concepts;
 export type ConceptId = (typeof Concepts)[ConceptKey];
@@ -36,9 +41,9 @@ export const CDCTopics = {
   COGNITION_SPACE_CREATED: "graph.node.created.v1:cognition:space",
   COGNITION_SPACE_UPDATED: "graph.node.updated.v1:cognition:space",
   COGNITION_SPACE_DELETED: "graph.node.deleted.v1:cognition:space",
-  __PRODUCT___GREETING_CREATED: "graph.node.created.v1:__PRODUCT__:greeting",
-  __PRODUCT___GREETING_UPDATED: "graph.node.updated.v1:__PRODUCT__:greeting",
-  __PRODUCT___GREETING_DELETED: "graph.node.deleted.v1:__PRODUCT__:greeting",
+  __PRODUCT_ID___GREETING_CREATED: "graph.node.created.v1:__PRODUCT__:greeting",
+  __PRODUCT_ID___GREETING_UPDATED: "graph.node.updated.v1:__PRODUCT__:greeting",
+  __PRODUCT_ID___GREETING_DELETED: "graph.node.deleted.v1:__PRODUCT__:greeting",
 } as const;
 
 /** Subscription filters: node.<action>.<concept> (the backend prepends `graph.`). */
@@ -46,9 +51,9 @@ export const CDCFilters = {
   COGNITION_SPACE_CREATED: "node.created.v1:cognition:space",
   COGNITION_SPACE_UPDATED: "node.updated.v1:cognition:space",
   COGNITION_SPACE_DELETED: "node.deleted.v1:cognition:space",
-  __PRODUCT___GREETING_CREATED: "node.created.v1:__PRODUCT__:greeting",
-  __PRODUCT___GREETING_UPDATED: "node.updated.v1:__PRODUCT__:greeting",
-  __PRODUCT___GREETING_DELETED: "node.deleted.v1:__PRODUCT__:greeting",
+  __PRODUCT_ID___GREETING_CREATED: "node.created.v1:__PRODUCT__:greeting",
+  __PRODUCT_ID___GREETING_UPDATED: "node.updated.v1:__PRODUCT__:greeting",
+  __PRODUCT_ID___GREETING_DELETED: "node.deleted.v1:__PRODUCT__:greeting",
 } as const;
 
 export type CDCAction = "created" | "updated" | "deleted";

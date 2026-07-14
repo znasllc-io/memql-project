@@ -23,10 +23,10 @@ export default function Live() {
       .then(() => {
         // Two equivalent ways to name the filter, both from the generated
         // surface -- a named constant, or the helper over a Concepts id:
-        //   CDCFilters.__PRODUCT___GREETING_CREATED
-        //   filterFor(Concepts.__PRODUCT___GREETING, "created")
-        const filter = CDCFilters.__PRODUCT___GREETING_CREATED;
-        void filterFor(Concepts.__PRODUCT___GREETING, "created"); // shown for reference
+        //   CDCFilters.__PRODUCT_ID___GREETING_CREATED
+        //   filterFor(Concepts.__PRODUCT_ID___GREETING, "created")
+        const filter = CDCFilters.__PRODUCT_ID___GREETING_CREATED;
+        void filterFor(Concepts.__PRODUCT_ID___GREETING, "created"); // shown for reference
         unsub = client.subscribe(filter, (node) => {
           setNodes((prev) => [node, ...prev].slice(0, 50));
         });
@@ -42,7 +42,7 @@ export default function Live() {
         <a href="/">← Home</a>
       </header>
       <p>
-        Subscribed to <code>{CDCFilters.__PRODUCT___GREETING_CREATED}</code> via the generated
+        Subscribed to <code>{CDCFilters.__PRODUCT_ID___GREETING_CREATED}</code> via the generated
         filter constants.
       </p>
       {error && <p className="error">{error}</p>}
