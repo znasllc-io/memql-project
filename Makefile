@@ -34,7 +34,13 @@ REVISION      = $(shell git rev-parse --abbrev-ref HEAD)
 # <product> (it need not be). Fall back to the org/product convention only when
 # there is no origin yet, and warn at `up` time so a wrong-name pin is visible
 # instead of silently pointing ArgoCD at a repo that does not exist (C12).
-ORIGIN_URL   := $(shell git remote get-url origin 2>/dev/null)
+# Normalize a GitHub SSH remote (git@github.com:org/repo.git or
+# ssh://git@github.com/org/repo.git) to its HTTPS form: ArgoCD authenticates a
+# PRIVATE product repo with a token (username/password), which is HTTPS-only --
+# an SSH repoURL would need an SSH key the local cluster has no way to seed, so
+# the Application could never fetch. HTTPS URLs and the fallback pass through
+# unchanged (C12).
+ORIGIN_URL   := $(shell git remote get-url origin 2>/dev/null | sed -E 's#^git@github\.com:#https://github.com/#; s#^ssh://git@github\.com/#https://github.com/#')
 REPO_URL     ?= $(if $(ORIGIN_URL),$(ORIGIN_URL),https://github.com/$(PRODUCT_ORG)/$(PRODUCT).git)
 IMPORT        = bash $(ENGINE)/scripts/k3d/import-image.sh
 
