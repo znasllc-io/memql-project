@@ -32,7 +32,7 @@ cap_init "product.init" "Stamp this template checkout in place into a concrete m
 cap_spec_param "product"      "product name (required; ^[a-z][a-z0-9-]*$; e.g. 'acme')"
 cap_spec_param "product-org"  "GitHub org/user owning this product repo (required; e.g. 'acme-io')"
 cap_spec_param "domain"       "the engine's fixed local domain (leave default for local; it is also the staging/prod public-entry placeholder) (default: local.znas.io)"
-cap_spec_param "engine-ref"   "engine ref to pin (default: latest engine release tag, else main)"
+cap_spec_param "engine-ref"   "engine ref to pin (default: main, until a >=0.12.0 engine release ships the downstream contract -- znasllc-io/memql#2510, flip-back memql-project#14)"
 cap_spec_param "registry"     "container registry for the product bundle + client images (default: empty = local-only)"
 cap_spec_param "cockpit-ref"  "cockpit ref to clone (default: main)"
 cap_spec_param "skip-clones"  "do not clone the engine/cockpit siblings (flag; for CI + offline runs)"
@@ -46,6 +46,25 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PARENT="$(cd "$ROOT/.." && pwd)"      # the workspace: engine + cockpit clone here
 ENGINE_REPO="https://github.com/znasllc-io/memql.git"
 COCKPIT_REPO="https://github.com/znasllc-io/memql-cockpit.git"
+
+# Default engine ref when --engine-ref is not passed. Deliberately the literal
+# "main", NOT the latest release tag: NO tagged engine release yet carries the
+# downstream contract this template needs. downstream-stacks.md declares
+# sinceVersion 0.12.0, but the latest tag is 0.11.2 -- which lacks
+# scripts/k3d/import-image.sh AND parses a mutually-exclusive DSL grammar, so a
+# tag-pinned stamp lints green yet cannot `make up`. Pinning main gives a stamp
+# whose grammar + k3d layout match the code the template targets. Flip this back
+# to resolve_latest_release_tag once a >=0.12.0 engine release exists.
+#   engine release gap:  znasllc-io/memql#2510
+#   flip-back tracking:  znasllc-io/memql-project#14
+DEFAULT_ENGINE_REF="main"
+
+# Unknown-flag allowlist. The vendored capability.sh cap_parse_flags accepts ANY
+# --flag (it only rejects positionals); this script enforces its own surface so
+# a typo'd flag fails loudly (exit 2) instead of being silently ignored. Upstream
+# fix -- making cap_parse_flags reject unknown flags against the declared spec --
+# is tracked in znasllc-io/memql#2508; drop this local check when it lands.
+CAP_KNOWN_FLAGS=" product product-org domain engine-ref registry cockpit-ref skip-clones dry-run help print-spec params-stdin "
 
 # Unknown-flag allowlist. The vendored capability.sh cap_parse_flags accepts ANY
 # --flag (it only rejects positionals); this script enforces its own surface so
@@ -171,33 +190,58 @@ function reconcile_with_existing_env() {
        || { [[ -n "$EXISTING_ORG" ]] && [[ "$EXISTING_ORG" != "$PRODUCT_ORG" ]]; }; then
         cap_fail 3 "product.env is already stamped as '${EXISTING_PRODUCT}/${EXISTING_ORG}'; refusing to re-stamp as '${PRODUCT}/${PRODUCT_ORG}' (a different identity) -- a token-keyed re-run would half-apply and leave the tree inconsistent. Re-run with the original identity, or start from a fresh template checkout."
     fi
+    if [[ -n "$ENGINE_REF_FLAG" && -n "$EXISTING_ENGINE_REF" && "$ENGINE_REF" != "$EXISTING_ENGINE_REF" ]]; then
+        cap_warn "--engine-ref '$ENGINE_REF' differs from the stamped ENGINE_REF '$EXISTING_ENGINE_REF'. The overlays already CONSUMED the old ref (the __ENGINE_REF__ tokens are gone), so the new ref lands in product.env ONLY -- the stamped manifests keep '$EXISTING_ENGINE_REF'. Re-stamp from a fresh template copy if you need the overlays repinned."
+    fi
     [[ -z "$DOMAIN_FLAG"     && -n "$EXISTING_DOMAIN"     ]] && DOMAIN="$EXISTING_DOMAIN"
     [[ -z "$ENGINE_REF_FLAG" && -n "$EXISTING_ENGINE_REF" ]] && ENGINE_REF="$EXISTING_ENGINE_REF"
     [[ -z "$REGISTRY_FLAG"   && "$EXISTING_REGISTRY_SET" == "1" ]] && REGISTRY_VALUE="$EXISTING_REGISTRY"
     return 0
 }
 
-# resolve_engine_ref -> echoes the ref to pin. Explicit param wins; else the
-# latest semver tag on the engine repo; else main.
-#
-# The engine tag set MIXES v-prefixed ('v0.9.6') and bare ('0.11.2') tags. A
-# naive `sort -V` sorts every 'v...' string AFTER every bare-numeric string, so
-# the newest bare release (0.11.2) loses to a far older v-tag (v0.9.6) -- the
-# instance then pins a runtime engine that cannot load the starter (B3). Fix:
-# sort on a v-STRIPPED key (field 1) while keeping the ORIGINAL tag string
-# (field 2) for the pin, so 'v0.9.6' and '0.9.6' compare by semver but whichever
-# real tag is newest is what we return verbatim.
-function resolve_engine_ref() {
-    if [[ -n "$ENGINE_REF" ]]; then printf '%s' "$ENGINE_REF"; return; fi
-    local latest
-    latest="$(git ls-remote --tags --refs "$ENGINE_REPO" 2>/dev/null \
+# detect_orphaned_stamp -- refuse (exit 3) when product.env is ABSENT but the
+# tree already shows stamp evidence (someone deleted product.env on an
+# already-stamped repo). Without this, a fresh stamp with a NEW identity
+# half-applies: the token-bearing paths were already renamed/substituted away, so
+# the run writes a product.env + envelope claiming the new name over a tree that
+# still carries the old one -- and reports ok:true (the B1-adjacent hole). Stamp
+# evidence = init.sh's own irreversible first-stamp effects: the pre-stamp DSL dir
+# `dsl/__PRODUCT__/` was renamed away, or `template-ci.yml` was pruned. A pristine
+# template checkout has BOTH, so a legitimate first stamp is never blocked.
+function detect_orphaned_stamp() {
+    [[ -f "$ROOT/product.env" ]] && return 0     # present -> reconcile_with_existing_env owns it
+    if [[ ! -d "$ROOT/dsl/__PRODUCT__" ]] || [[ ! -e "$ROOT/.github/workflows/template-ci.yml" ]]; then
+        cap_fail 3 "product.env is missing but this tree was already stamped (dsl/__PRODUCT__/ was renamed away, or template-ci.yml was pruned) -- refusing to stamp over it with a new identity. Restore product.env (e.g. 'git checkout -- product.env' or from history), or start from a fresh template checkout."
+    fi
+    return 0
+}
+
+# resolve_latest_release_tag -> the newest engine RELEASE tag (or "" if none).
+# RETAINED for the flip-back to a tag default (memql-project#14) once a >=0.12.0
+# engine release ships the downstream contract; it is NOT called while the
+# default is main (see DEFAULT_ENGINE_REF). The engine tag set MIXES v-prefixed
+# ('v0.9.6') and bare ('0.11.2') tags; a naive `sort -V` sorts every 'v...'
+# string AFTER every bare-numeric one, so the newest bare release loses to a far
+# older v-tag. Sort on a v-STRIPPED key (field 1) while keeping the ORIGINAL tag
+# string (field 2) for the pin (the B3a fix, kept live for the flip).
+function resolve_latest_release_tag() {
+    git ls-remote --tags --refs "$ENGINE_REPO" 2>/dev/null \
         | awk -F/ '{print $NF}' \
         | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' \
         | awk '{orig=$0; norm=$0; sub(/^v/,"",norm); print norm"\t"orig}' \
         | sort -V -k1,1 \
         | tail -1 \
-        | cut -f2 || true)"
-    printf '%s' "${latest:-main}"
+        | cut -f2 || true
+}
+
+# resolve_engine_ref -> echoes the ref to pin. Explicit --engine-ref wins; else
+# the default (currently DEFAULT_ENGINE_REF="main"; see its note + #2510/#14).
+# FLIP for #14: replace the default line with
+#   local latest; latest="$(resolve_latest_release_tag)"; printf '%s' "${latest:-main}"
+# once a >=0.12.0 engine release exists.
+function resolve_engine_ref() {
+    if [[ -n "$ENGINE_REF" ]]; then printf '%s' "$ENGINE_REF"; return; fi
+    printf '%s' "$DEFAULT_ENGINE_REF"
 }
 
 # PRODUCT_ID -- an identifier-safe form of the product name (hyphens -> under-
@@ -459,10 +503,12 @@ function main() {
 
     validate_params
     require_prerequisites
-    # Re-run reconciliation BEFORE resolving/validating/mutating: refuse an
-    # identity change (exit 3) and preserve pinned values so a flagless re-run is
-    # a true no-op (B1). Must precede resolve_engine_ref so preserved refs are
-    # not re-resolved over the network.
+    # Guard the re-run cases BEFORE resolving/validating/mutating (all exit 3, no
+    # mutation): (1) product.env deleted on an already-stamped tree, and (2)
+    # product.env present but the requested identity disagrees. Reconcile also
+    # preserves pinned values so a flagless re-run is a true no-op (B1); it must
+    # precede resolve_engine_ref so a preserved ref is not re-resolved.
+    detect_orphaned_stamp
     reconcile_with_existing_env
     validate_substitution_values
     PRODUCT_ID="${PRODUCT//-/_}"     # identifier-safe form for JS/TS/Go id positions (B5)
