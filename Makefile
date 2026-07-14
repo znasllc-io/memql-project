@@ -40,7 +40,7 @@ REVISION      = $(shell git rev-parse --abbrev-ref HEAD)
 # an SSH repoURL would need an SSH key the local cluster has no way to seed, so
 # the Application could never fetch. HTTPS URLs and the fallback pass through
 # unchanged (C12).
-ORIGIN_URL   := $(shell git remote get-url origin 2>/dev/null | sed -E 's#^git@github\.com:#https://github.com/#; s#^ssh://git@github\.com/#https://github.com/#')
+ORIGIN_URL   := $(shell git remote get-url origin 2>/dev/null | sed -E 's,^git@github\.com:,https://github.com/,; s,^ssh://git@github\.com/,https://github.com/,')
 REPO_URL     ?= $(if $(ORIGIN_URL),$(ORIGIN_URL),https://github.com/$(PRODUCT_ORG)/$(PRODUCT).git)
 IMPORT        = bash $(ENGINE)/scripts/k3d/import-image.sh
 
