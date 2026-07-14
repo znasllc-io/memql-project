@@ -194,30 +194,20 @@ jobs:
       # znasllc-io/memql#2509.
       #
       # Engine ref: the pinned ENGINE_REF from product.env (a stamped instance),
-      # else the SAME default init.sh would pin -- the latest engine RELEASE TAG,
-      # NOT main. The starter DSL is authored for the pinned/latest-tag grammar;
-      # engine main moves ahead of releases (e.g. call-arg syntax), so linting the
-      # starter against main would test a combination no instance ever runs -- the
-      # same class of false-green as B4. Falling back to a silent main clone on a
-      # pinned-ref failure is removed (C2): a failed clone of a known ref is fatal.
+      # else the SAME default init.sh pins -- currently "main" (no tagged engine
+      # release yet carries the downstream contract; znasllc-io/memql#2510,
+      # flip-back memql-project#14). The starter DSL is authored for that pinned
+      # ref's grammar, so linting against the ref instances actually get is what
+      # keeps this gate honest (the B4 lesson). A failed clone of a known ref is
+      # fatal -- no silent fallback to main (C2).
       - name: clone the engine at the pinned/default ref (for memqllint)
         run: |
           set -euo pipefail
-          ref=""
+          ref=main
           if [ -f product.env ]; then
             # shellcheck disable=SC1091
             . ./product.env
             [ -n "${ENGINE_REF:-}" ] && ref="$ENGINE_REF"
-          fi
-          if [ -z "$ref" ]; then
-            # Mirror init.sh resolve_engine_ref: newest semver tag (v-stripped
-            # sort key, original tag kept), else main.
-            ref="$(git ls-remote --tags --refs https://github.com/znasllc-io/memql.git 2>/dev/null \
-              | awk -F/ '{print $NF}' \
-              | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' \
-              | awk '{orig=$0; norm=$0; sub(/^v/,"",norm); print norm"\t"orig}' \
-              | sort -V -k1,1 | tail -1 | cut -f2 || true)"
-            [ -n "$ref" ] || ref=main
           fi
           echo "engine ref: $ref"
           git clone --depth 1 --branch "$ref" https://github.com/znasllc-io/memql.git /tmp/memql \
