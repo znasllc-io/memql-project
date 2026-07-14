@@ -17,6 +17,13 @@
 # Product identity (written by scripts/init.sh; absent in the raw template).
 -include product.env
 
+# Optional product-OWNED extension. The raw template ships no product.mk; a
+# product may add ./product.mk to extend the LOCAL lifecycle via the double-colon
+# hooks defined under "Product extension hooks" below. It is deliberately kept
+# OUT of template sync (the template never ships one), so a product's product.mk
+# stays put and `git merge template/main` never conflicts on it.
+-include product.mk
+
 ENGINE       ?= ../memql
 # One shared local k3d cluster (the engine creates it, the product joins it).
 # Overridable, but it is threaded through EVERY placement step below -- the
@@ -72,6 +79,7 @@ up: require-env
 	$(IMPORT) --image=$(BUNDLE_IMAGE) --cluster=$(CLUSTER) --dryRun=false
 	@echo "==> [3/4] build + import the product SPA image"
 	$(MAKE) -C client image CLUSTER=$(CLUSTER)
+	$(MAKE) product-up CLUSTER=$(CLUSTER) NAMESPACE=$(NAMESPACE)
 	@echo "==> [4/4] register the product ArgoCD Application ($(PRODUCT)-local)"
 	MEMQL_K3D_REPO_TOKEN=$${MEMQL_K3D_REPO_TOKEN:-$$(gh auth token 2>/dev/null)} \
 	bash $(ENGINE)/scripts/k3d/up.sh \
@@ -90,6 +98,7 @@ up: require-env
 dev: require-env
 	docker build -f deploy/Dockerfile.bundle -t $(BUNDLE_IMAGE) .
 	$(IMPORT) --image=$(BUNDLE_IMAGE) --cluster=$(CLUSTER) --dryRun=false
+	$(MAKE) product-dev CLUSTER=$(CLUSTER) NAMESPACE=$(NAMESPACE)
 	kubectl rollout restart -n $(NAMESPACE) deploy -l memql/product-dsl=true
 	kubectl rollout status  -n $(NAMESPACE) deploy -l memql/product-dsl=true --timeout=180s
 
@@ -102,6 +111,37 @@ status: require-env
 ## Tear down the whole local cluster (engine + product share it).
 down:
 	$(MAKE) -C $(ENGINE) down CLUSTER=$(CLUSTER)
+
+# -----------------------------------------------------------------------------
+# Product extension hooks (the seam a product.mk plugs into)
+# -----------------------------------------------------------------------------
+# The lifecycle above calls these at the local build/placement seam. They are
+# NO-OPS here, so `make up | dev` work with no product.mk. A product with a
+# genuinely product-specific LOCAL concern -- extra images to build+import
+# (simulators, sidecars), an extra local placement step -- adds it in
+# ./product.mk (product-owned, git-tracked by the PRODUCT, not template-synced)
+# by extending these hooks with DOUBLE-COLON rules, e.g.:
+#
+#     product-up:: my-extra-images                     # in ./product.mk
+#     my-extra-images:
+#         docker build -t my-extra:local extra/
+#         $(IMPORT) --image=my-extra:local --cluster=$(CLUSTER) --dryRun=false
+#
+# Timing/contract:
+#   - `product-up` runs during `make up` AFTER the SPA image is imported and
+#     BEFORE the product Application is registered, so anything it imports is
+#     already present (imagePullPolicy IfNotPresent) when ArgoCD schedules it.
+#   - `product-dev` runs during `make dev`.
+#   - Both run ONLY in the local lifecycle; whether those extras are actually
+#     scheduled is the LOCAL overlay's call, so staging/prod stay fail-closed
+#     unless their overlays opt in.
+#   - No `down` hook: extras placed by the local overlay are torn down with the
+#     shared cluster.
+.PHONY: product-up product-dev
+product-up::
+	@:
+product-dev::
+	@:
 
 # -----------------------------------------------------------------------------
 # Build / validate (no cluster)

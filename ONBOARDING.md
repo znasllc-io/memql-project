@@ -62,6 +62,19 @@ The front door serves `https://identity.__DOMAIN__`, `https://bff.__DOMAIN__`,
 `https://app.__DOMAIN__` (portless TLS, mkcert wildcard). A private product repo
 needs `MEMQL_K3D_REPO_TOKEN=$(gh auth token)` on `make up` so ArgoCD can read it.
 
+**Extending the local lifecycle (`product.mk`).** The Makefile is byte-identical
+across products, but it `-include`s an optional, product-OWNED `./product.mk` and
+calls two no-op hooks -- `product-up` (during `make up`, after the SPA image is
+imported and before the product Application is registered) and `product-dev`
+(during `make dev`). A product with a genuinely product-specific LOCAL concern --
+extra images to build+import (e.g. simulators standing in for external systems),
+an extra local placement step -- adds it there with double-colon rules
+(`product-up:: my-extra-images`). `product.mk` is git-tracked by the PRODUCT and
+never template-synced, so it stays put across `git merge template/main`. Whether
+the extras are scheduled is the LOCAL overlay's call, so staging/prod stay
+fail-closed unless their overlays opt in. See the Makefile's "Product extension
+hooks" section.
+
 ## The DSL (the whole product surface)
 
 `dsl/__PRODUCT__/` holds `concepts` / `queries` / `mutations` / `shapes` /
