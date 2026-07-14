@@ -1,0 +1,191 @@
+name: publish-images
+
+# Build the product's two images -- the DSL bundle (deploy/Dockerfile.bundle) and
+# the SPA (client/Dockerfile) -- and push them to the product registry,
+# digest-pinned, so a staging/prod overlay can be pinned by @sha256.
+#
+# GENERIC / TEMPLATE-OWNED: this workflow bakes NO product name. It reads product
+# identity from product.env (PRODUCT, PRODUCT_ORG, REGISTRY) at run time, so it
+# stays byte-identical across every stamped instance and rides `git merge
+# template/main`. A second product wants exactly this, unchanged.
+#
+# packages:write is REQUIRED. The repo's default GITHUB_TOKEN is READ-ONLY for
+# packages (default_workflow_permissions="read"), so without the explicit grant
+# below the push 403s. Images pushed from a PRIVATE repo default to PRIVATE
+# package visibility -- promote a package to public deliberately, never by
+# default.
+#
+# workflow_dispatch is the operator entry (Actions tab / `gh workflow run`). For
+# a dispatch from a feature branch to be ACCEPTED, this file must also exist on
+# the repo's default branch (a GitHub constraint) -- land it on main first, then
+# dispatch `--ref <branch>`.
+
+on:
+  workflow_dispatch:
+    inputs:
+      registry:
+        description: "Registry host[/path] to push to (default: REGISTRY from product.env, e.g. ghcr.io/<org>)."
+        required: false
+        type: string
+      tag:
+        description: "Immutable image tag for this build (default: 12-char git SHA)."
+        required: false
+        type: string
+      push:
+        description: "Push to the registry. Uncheck to build-only (validate the build; no registry writes, no digests)."
+        required: false
+        type: boolean
+        default: true
+
+concurrency:
+  # Serialize per ref so two dispatches on the same branch never race the same
+  # tag. Never cancel an in-flight publish -- a half-pushed release is worse than
+  # a queued one.
+  group: publish-images-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: resolve identity + params (product.env)
+        id: cfg
+        env:
+          IN_REGISTRY: ${{ inputs.registry }}
+          IN_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          [ -f product.env ] || { echo "ERROR: product.env not found -- run scripts/init.sh first" >&2; exit 1; }
+          # shellcheck disable=SC1091
+          . ./product.env
+          : "${PRODUCT:?PRODUCT empty in product.env}"
+          : "${PRODUCT_ORG:?PRODUCT_ORG empty in product.env}"
+          registry="${IN_REGISTRY:-${REGISTRY:-}}"
+          [ -n "$registry" ] || { echo "ERROR: no registry -- set REGISTRY in product.env or pass the 'registry' input" >&2; exit 1; }
+          tag="${IN_TAG:-}"
+          [ -n "$tag" ] || tag="$(git rev-parse --short=12 HEAD)"
+          {
+            echo "product=$PRODUCT"
+            echo "registry=$registry"
+            echo "registry_host=${registry%%/*}"
+            echo "tag=$tag"
+          } >> "$GITHUB_OUTPUT"
+          echo "resolved: registry=$registry product=$PRODUCT tag=$tag" >&2
+
+      - name: registry login
+        if: ${{ inputs.push }}
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOST: ${{ steps.cfg.outputs.registry_host }}
+          ACTOR: ${{ github.actor }}
+        run: printf '%s' "$TOKEN" | docker login "$HOST" -u "$ACTOR" --password-stdin
+
+      - name: build + push images (digest-pinned)
+        id: build
+        env:
+          REGISTRY: ${{ steps.cfg.outputs.registry }}
+          PRODUCT: ${{ steps.cfg.outputs.product }}
+          TAG: ${{ steps.cfg.outputs.tag }}
+          PUSH: ${{ inputs.push }}
+          # For the SPA image's optional private-scope npm install (@<org> SDKs).
+          # The starter is self-contained (public deps only), so this is unused
+          # today; the Dockerfile marks the BuildKit secret required=false.
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          export DOCKER_BUILDKIT=1
+
+          # Resolve the registry manifest digest of a just-pushed tag.
+          push_digest() {
+            local ref="$1"
+            docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$ref:$TAG" \
+              | sed -n "s#^${ref}@##p" | head -1
+          }
+
+          # build_one <output-key> <image-suffix> <dockerfile> <context> [extra docker build args...]
+          build_one() {
+            local key="$1" suffix="$2" dockerfile="$3" context="$4"; shift 4
+            local ref="$REGISTRY/$PRODUCT-$suffix"
+            echo "==> build $ref:$TAG (-f $dockerfile $context)" >&2
+            docker build -f "$dockerfile" -t "$ref:$TAG" "$@" "$context" >&2
+            printf '%s_image=%s\n' "$key" "$ref" >> "$GITHUB_OUTPUT"
+            if [ "$PUSH" != "true" ]; then
+              echo "build-only (push disabled): skipping push + digest for $suffix" >&2
+              printf '%s_digest=\n' "$key" >> "$GITHUB_OUTPUT"
+              return 0
+            fi
+            docker push "$ref:$TAG" >&2
+            local digest; digest="$(push_digest "$ref")"
+            [ -n "$digest" ] || { echo "ERROR: could not resolve pushed digest for $ref:$TAG" >&2; exit 1; }
+            echo "    $suffix -> $digest" >&2
+            printf '%s_digest=%s\n' "$key" "$digest" >> "$GITHUB_OUTPUT"
+          }
+
+          # The DSL bundle: data-only image, build context is the repo root so
+          # `COPY dsl /bundle` resolves (deploy/Dockerfile.bundle).
+          build_one bundle dsl-bundle deploy/Dockerfile.bundle .
+
+          # The SPA: BuildKit secret carries NODE_AUTH_TOKEN (optional), context
+          # is client/. The client build args keep their Dockerfile defaults
+          # (the starter SPA runs on sim data until the live memql seam is wired).
+          build_one client client client/Dockerfile client \
+            --secret id=node_auth_token,env=NODE_AUTH_TOKEN
+
+      - name: emit release lockfile + digest summary
+        if: ${{ inputs.push }}
+        env:
+          REGISTRY: ${{ steps.cfg.outputs.registry }}
+          PRODUCT: ${{ steps.cfg.outputs.product }}
+          TAG: ${{ steps.cfg.outputs.tag }}
+          BUNDLE_IMAGE: ${{ steps.build.outputs.bundle_image }}
+          BUNDLE_DIGEST: ${{ steps.build.outputs.bundle_digest }}
+          CLIENT_IMAGE: ${{ steps.build.outputs.client_image }}
+          CLIENT_DIGEST: ${{ steps.build.outputs.client_digest }}
+        run: |
+          set -euo pipefail
+          # ENGINE_REF for the lockfile's builtAgainstEngine coherence field.
+          engine_ref=""
+          # shellcheck disable=SC1091
+          [ -f product.env ] && . ./product.env && engine_ref="${ENGINE_REF:-}"
+
+          {
+            echo "## publish-images: $PRODUCT @ $TAG"
+            echo ""
+            echo "| component | image | digest |"
+            echo "|-----------|-------|--------|"
+            echo "| dsl-bundle | \`$BUNDLE_IMAGE\` | \`$BUNDLE_DIGEST\` |"
+            echo "| client | \`$CLIENT_IMAGE\` | \`$CLIENT_DIGEST\` |"
+            echo ""
+            echo "Pin the overlay + assemble a lockfile with scripts/release/:"
+            echo ""
+            echo '```sh'
+            echo "scripts/release/assemble-lockfile.sh \\"
+            echo "  --release=$TAG --engine-ref=$engine_ref \\"
+            echo "  --bundle-digest=$BUNDLE_DIGEST \\"
+            echo "  --client-digest=$CLIENT_DIGEST"
+            echo "scripts/release/promote.sh --release=$TAG --to-env=staging"
+            echo '```'
+            echo ""
+            echo "### release lockfile (deploy/releases/$TAG.yaml)"
+            echo '```yaml'
+            echo "# $PRODUCT release lockfile -- generated by publish-images.yml."
+            echo "# Immutable: a new release gets a new file; never edit in place."
+            echo "release: \"$TAG\""
+            echo "registry: \"$REGISTRY\""
+            echo "engineRef: \"$engine_ref\""
+            echo "components:"
+            echo "  dsl-bundle:"
+            echo "    image: \"$BUNDLE_IMAGE\""
+            echo "    digest: \"$BUNDLE_DIGEST\""
+            echo "  client:"
+            echo "    image: \"$CLIENT_IMAGE\""
+            echo "    digest: \"$CLIENT_DIGEST\""
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
