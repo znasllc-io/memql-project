@@ -58,25 +58,27 @@ no dependency on an unpublished package**.
    rows; `topicFor` / `filterFor` for subscriptions) is identical, so the swap is
    mechanical.
 
-## WebSocket auth (known risk, engine-gated)
+## WebSocket auth
 
 The starter memQL client (`src/lib/memql/client.ts`) dials the engine's WS bridge
-as `wss://.../memql/ws?token=<JWT>` -- the bearer token rides the **URL query
-string**. URLs are routinely captured by ingress/proxy access logs and browser
-history, so the token can leak into logs.
+at `wss://.../memql/ws` and carries the bearer token in the handshake's
+**`Sec-WebSocket-Protocol`** header, not in the URL. It opens the socket as
+`new WebSocket(url, ["bearer", token])`: the first subprotocol entry is the scheme
+discriminator (`"bearer"`) and the second is the raw JWT credential (JWTs are
+valid RFC 6455 subprotocol tokens, so there is no re-encoding). With no token
+(pre-login) the socket opens with no subprotocols at all.
 
-The WS handshake contract is **engine-owned**, so this template cannot move the
-token off the URL until the engine accepts an alternative (a
-`Sec-WebSocket-Protocol` bearer subprotocol or a short-lived ticket exchange).
-That work is tracked engine-side in **znasllc-io/memql#2511**; when it lands, swap
-the client to the new handshake.
+The engine negotiates the `"bearer"` scheme entry back on the `101` response
+(`ws.protocol === "bearer"` after open); browsers **abort** the handshake if the
+server does not echo it. This handshake therefore **requires engine >= 0.12.1**
+(the first release that accepts subprotocol credentials --
+[znasllc-io/memql#2511](https://github.com/znasllc-io/memql/issues/2511)); older
+engines reject it. Fresh stamps resolve the latest engine release automatically,
+so new products satisfy this by default.
 
-**Until then, mitigate at the edge:** configure the ingress / reverse proxy that
-fronts `/memql/ws` to **drop the query string** from its access-log format so the
-token is never written to disk. For example, log the path without its query
-(nginx: log `$uri` rather than `$request`/`$request_uri` for that location), and
-audit any proxy or APM in front of it for the same. Prefer `wss://` end to end so
-the token is never on the wire in clear text.
+No credential ever rides the URL query string, so the token is never written to
+ingress/proxy access logs or browser history. Prefer `wss://` end to end so the
+token is never on the wire in clear text.
 
 ## Local development
 

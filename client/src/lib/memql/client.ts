@@ -44,22 +44,25 @@ export class MemqlClient {
 
   private wsUrl(): string {
     const base = this.opts.httpUrl.replace(/^http/, "ws").replace(/\/$/, "");
-    // SECURITY (known risk, engine-gated -- znasllc-io/memql#2511): the bearer
-    // token rides the WS URL as a `?token=` query param. URLs are routinely
-    // logged by ingresses, reverse proxies, and browser history, so the token can
-    // leak into access logs. The WS handshake contract is engine-owned, so the
-    // template cannot move the token off the URL until the engine accepts an
-    // alternative (a Sec-WebSocket-Protocol bearer subprotocol or a short-lived
-    // ticket exchange) -- tracked in znasllc-io/memql#2511. MITIGATION until then:
-    // configure the ingress/proxy fronting /memql/ws to DROP the query string
-    // from its access-log format (see client/README.md "WebSocket auth" note).
-    const q = this.opts.token ? `?token=${encodeURIComponent(this.opts.token)}` : "";
-    return `${base}/memql/ws${q}`;
+    return `${base}/memql/ws`;
   }
 
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
-      const ws = new WebSocket(this.wsUrl());
+      // AUTH: the bearer token travels in the WebSocket handshake's
+      // Sec-WebSocket-Protocol header, never in the URL query string. Per the
+      // engine contract (znasllc-io/memql#2511), the first subprotocol entry is
+      // the scheme discriminator ("bearer") and the second is the raw JWT
+      // credential -- JWTs are valid RFC 6455 subprotocol tokens, so no
+      // re-encoding. The engine negotiates the "bearer" entry back on the 101
+      // response; browsers abort the handshake if the server does not echo it,
+      // so this path REQUIRES engine >= 0.12.1 (older engines reject it). No
+      // credential ever rides the URL, so nothing leaks into ingress/proxy
+      // access logs or browser history. With no token (e.g. pre-login) open the
+      // socket with no subprotocols at all.
+      const ws = this.opts.token
+        ? new WebSocket(this.wsUrl(), ["bearer", this.opts.token])
+        : new WebSocket(this.wsUrl());
       this.ws = ws;
       ws.onopen = () => resolve();
       ws.onerror = () => reject(new Error("memql ws connection failed"));

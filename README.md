@@ -91,7 +91,7 @@ conflicts on plumbing.
 | `__PRODUCT__` | product name (lowercase slug) | `acme` |
 | `__PRODUCT_ORG__` | GitHub org/user owning the product repo | `acme-io` |
 | `__DOMAIN__` | engine's fixed local domain (mkcert wildcard); also the staging/prod public-entry placeholder | `local.znas.io` |
-| `__ENGINE_REF__` | engine ref pinned at stamp time (default: latest engine release tag, see below) | `0.12.0` |
+| `__ENGINE_REF__` | engine ref pinned at stamp time (default: latest engine release tag, see below) | `0.12.1` |
 | `__REGISTRY__` | container registry for the product images | `ghcr.io/acme-io` |
 
 The engine org (`znasllc-io`) and the engine registry (`acrmemql.azurecr.io`)
