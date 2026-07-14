@@ -23,8 +23,9 @@ MEMQL_HTTP_URL ?= https://bff.$(DOMAIN)
 
 .PHONY: dev dev-frontend image build typecheck lint up status down
 
-## Start the Vite dev server (:8080, proxies /memql to the bff). The backend
-## cluster must already be up -- `make -C .. up` brings it up.
+## Start the Vite dev server (proxies /memql to the bff; the dev-server port is
+## set by the client's vite config). The backend cluster must already be up --
+## `make -C .. up` brings it up.
 dev:
 	MEMQL_HTTP_URL=$(MEMQL_HTTP_URL) $(NPM) run dev
 
@@ -78,7 +79,7 @@ help:
 	@echo "$(if $(PRODUCT),$(PRODUCT),<product>) client"
 	@echo ""
 	@echo "Client dev loop:"
-	@echo "  make dev         Vite dev server on :8080 (cluster must be up)"
+	@echo "  make dev         Vite dev server (port per vite config; cluster must be up)"
 	@echo "  make image       Build + import + roll the in-cluster SPA image"
 	@echo "  make build       Production build (tsc + vite)"
 	@echo "  make typecheck   tsc --noEmit"
