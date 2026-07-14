@@ -14,6 +14,10 @@ concurrency:
 
 permissions:
   contents: read
+  # The client lane may install org-scoped GitHub Packages (the memQL SDK)
+  # once a product wires it; read access costs nothing for the self-contained
+  # starter and unblocks every stamped instance.
+  packages: read
 
 # PRODUCT CI: the lanes that ship to every stamped instance and also pass
 # in-template against the starter payload. Path-filtered (client/deploy/dsl),
@@ -135,15 +139,24 @@ jobs:
         with:
           node-version: '20'
       # The starter shell is SELF-CONTAINED (a thin local memQL client + a local
-      # generated concepts module), so it depends on zero private SDKs: npm
-      # install needs NO NODE_AUTH_TOKEN and the full typecheck+build+lint run
-      # unconditionally, in-template (unstamped) and in every stamped instance.
+      # generated concepts module) and installs with zero private SDKs. A
+      # stamped product that adopts the org SDK (client/.npmrc maps the org
+      # scope to GitHub Packages) needs a token at install time, so the lane
+      # provides NODE_AUTH_TOKEN unconditionally: the job's GITHUB_TOKEN
+      # (packages: read) covers packages linked to the product repo; when the
+      # SDK package lives in ANOTHER repo (the common case -- it is published
+      # from the engine repo), grant this repo access on the package, or set
+      # the optional NPM_PACKAGES_READ_TOKEN repo secret (a PAT with
+      # read:packages) which takes precedence. The starter never consults the
+      # token (no org-scoped deps), so the lane stays green in-template.
       # The test step runs ONLY when the client defines a `test` script: a
       # product that drops in a vitest/jest suite rides it on this lane
       # automatically, while the starter (which ships no test script) skips it
       # gracefully so the lane stays green in-template.
       - name: npm install + typecheck + build + lint (+ test when defined)
         working-directory: client
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_PACKAGES_READ_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           npm install --no-audit --no-fund
           npm run typecheck
