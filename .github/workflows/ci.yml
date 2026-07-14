@@ -215,24 +215,28 @@ jobs:
       # znasllc-io/memql#2509.
       #
       # Engine ref: the pinned ENGINE_REF from product.env (a stamped instance),
-      # else the SAME default init.sh pins -- currently "main" (no tagged engine
-      # release yet carries the downstream contract; znasllc-io/memql#2510,
-      # flip-back memql-project#14). The starter DSL is authored for that pinned
-      # ref's grammar, so linting against the ref instances actually get is what
-      # keeps this gate honest (the B4 lesson). A failed clone of a known ref is
-      # fatal -- no silent fallback to main (C2).
+      # else -- the unstamped in-template path -- the SAME default init.sh pins:
+      # the latest engine RELEASE tag, resolved via `init.sh --dry-run` so this gate
+      # and the stamper can never diverge on the default (memql-project#14). The
+      # starter DSL is authored for that ref's grammar, so linting against the ref
+      # instances actually get is what keeps this gate honest (the B4 lesson). A
+      # failed clone of a known ref is fatal -- no silent fallback to main (C2).
       - name: clone the engine at the pinned/default ref (for memqllint)
         run: |
           set -euo pipefail
-          ref=main
+          ref=""
           if [ -f product.env ]; then
             # shellcheck disable=SC1091
             . ./product.env
-            [ -n "${ENGINE_REF:-}" ] && ref="$ENGINE_REF"
+            ref="${ENGINE_REF:-}"
           fi
+          if [ -z "$ref" ]; then
+            ref="$(scripts/init.sh --product=ci-probe --product-org=ci-probe --skip-clones --dry-run 2>/dev/null | jq -r '.result.engineRef // empty')"
+          fi
+          [ -n "$ref" ] || { echo "ERROR: could not resolve an engine ref (no product.env pin, and default resolution failed)" >&2; exit 1; }
           echo "engine ref: $ref"
           git clone --depth 1 --branch "$ref" https://github.com/znasllc-io/memql.git /tmp/memql \
-            || { echo "ERROR: failed to clone engine at ref '$ref' -- refusing to fall back to main" >&2; exit 1; }
+            || { echo "ERROR: failed to clone engine at ref '$ref'" >&2; exit 1; }
       - name: memqllint every product DSL domain
         run: |
           set -euo pipefail

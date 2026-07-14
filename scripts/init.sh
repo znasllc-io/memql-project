@@ -32,7 +32,7 @@ cap_init "product.init" "Stamp this template checkout in place into a concrete m
 cap_spec_param "product"      "product name (required; ^[a-z][a-z0-9-]*$; e.g. 'acme')"
 cap_spec_param "product-org"  "GitHub org/user owning this product repo (required; e.g. 'acme-io')"
 cap_spec_param "domain"       "the engine's fixed local domain (leave default for local; it is also the staging/prod public-entry placeholder) (default: local.znas.io)"
-cap_spec_param "engine-ref"   "engine ref to pin (default: main, until a >=0.12.0 engine release ships the downstream contract -- znasllc-io/memql#2510, flip-back memql-project#14)"
+cap_spec_param "engine-ref"   "engine ref to pin (default: the latest engine release tag, resolved at stamp time; falls back to main with a loud warning when offline)"
 cap_spec_param "registry"     "container registry for the product bundle + client images (default: empty = local-only)"
 cap_spec_param "cockpit-ref"  "cockpit ref to clone (default: main)"
 cap_spec_param "skip-clones"  "do not clone the engine/cockpit siblings (flag; for CI + offline runs)"
@@ -46,18 +46,6 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PARENT="$(cd "$ROOT/.." && pwd)"      # the workspace: engine + cockpit clone here
 ENGINE_REPO="https://github.com/znasllc-io/memql.git"
 COCKPIT_REPO="https://github.com/znasllc-io/memql-cockpit.git"
-
-# Default engine ref when --engine-ref is not passed. Deliberately the literal
-# "main", NOT the latest release tag: NO tagged engine release yet carries the
-# downstream contract this template needs. downstream-stacks.md declares
-# sinceVersion 0.12.0, but the latest tag is 0.11.2 -- which lacks
-# scripts/k3d/import-image.sh AND parses a mutually-exclusive DSL grammar, so a
-# tag-pinned stamp lints green yet cannot `make up`. Pinning main gives a stamp
-# whose grammar + k3d layout match the code the template targets. Flip this back
-# to resolve_latest_release_tag once a >=0.12.0 engine release exists.
-#   engine release gap:  znasllc-io/memql#2510
-#   flip-back tracking:  znasllc-io/memql-project#14
-DEFAULT_ENGINE_REF="main"
 
 # Unknown-flag allowlist. The vendored capability.sh cap_parse_flags accepts ANY
 # --flag (it only rejects positionals); this script enforces its own surface so
@@ -233,14 +221,13 @@ function detect_orphaned_stamp() {
     return 0
 }
 
-# resolve_latest_release_tag -> the newest engine RELEASE tag (or "" if none).
-# RETAINED for the flip-back to a tag default (memql-project#14) once a >=0.12.0
-# engine release ships the downstream contract; it is NOT called while the
-# default is main (see DEFAULT_ENGINE_REF). The engine tag set MIXES v-prefixed
-# ('v0.9.6') and bare ('0.11.2') tags; a naive `sort -V` sorts every 'v...'
-# string AFTER every bare-numeric one, so the newest bare release loses to a far
-# older v-tag. Sort on a v-STRIPPED key (field 1) while keeping the ORIGINAL tag
-# string (field 2) for the pin (the B3a fix, kept live for the flip).
+# resolve_latest_release_tag -> the newest engine RELEASE tag (or "" if none, e.g.
+# offline / no release tags). This is the default engine-ref resolver:
+# resolve_engine_ref calls it whenever --engine-ref is not passed. The engine tag
+# set MIXES v-prefixed ('v0.9.6') and bare ('0.11.2') tags; a naive `sort -V` sorts
+# every 'v...' string AFTER every bare-numeric one, so the newest bare release loses
+# to a far older v-tag. Sort on a v-STRIPPED key (field 1) while keeping the ORIGINAL
+# tag string (field 2) for the pin (the B3a fix).
 function resolve_latest_release_tag() {
     git ls-remote --tags --refs "$ENGINE_REPO" 2>/dev/null \
         | awk -F/ '{print $NF}' \
@@ -251,14 +238,21 @@ function resolve_latest_release_tag() {
         | cut -f2 || true
 }
 
-# resolve_engine_ref -> echoes the ref to pin. Explicit --engine-ref wins; else
-# the default (currently DEFAULT_ENGINE_REF="main"; see its note + #2510/#14).
-# FLIP for #14: replace the default line with
-#   local latest; latest="$(resolve_latest_release_tag)"; printf '%s' "${latest:-main}"
-# once a >=0.12.0 engine release exists.
+# resolve_engine_ref -> echoes the ref to pin. Explicit --engine-ref wins (and a
+# flagless re-run reuses the stamped pin, set by reconcile_with_existing_env before
+# this runs -- so re-runs never re-resolve over the network). Otherwise resolve the
+# latest engine release tag over the network. If resolution yields nothing (offline,
+# or the engine has no release tags), fall back to "main" with a LOUD warning: the
+# stamp then tracks engine main rather than a pinned release, so the operator should
+# re-stamp with --engine-ref=<tag> once online.
+# History: this default was temporarily pinned to the literal "main" while the engine
+# shipped no consolidation release (memql-project#14; memql#2510, now resolved).
 function resolve_engine_ref() {
     if [[ -n "$ENGINE_REF" ]]; then printf '%s' "$ENGINE_REF"; return; fi
-    printf '%s' "$DEFAULT_ENGINE_REF"
+    local latest; latest="$(resolve_latest_release_tag)"
+    if [[ -n "$latest" ]]; then printf '%s' "$latest"; return; fi
+    cap_warn "could not resolve the latest engine release tag from ${ENGINE_REPO} (offline, or no release tags); falling back to 'main'. This stamp will track engine main, NOT a pinned release -- re-run with --engine-ref=<tag> once online to pin a release."
+    printf '%s' "main"
 }
 
 # PRODUCT_ID -- an identifier-safe form of the product name (hyphens -> under-
