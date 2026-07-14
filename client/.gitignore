@@ -11,3 +11,9 @@ dist
 
 # Logs
 npm-debug.log*
+
+# Lockfile: the starter client ships no package-lock.json and CI uses
+# `npm install`, so a local verify run leaves an untracked lockfile behind.
+# Ignore it here. Remove this ignore if your product commits a lockfile -- real
+# apps that replace the starter shell usually do; do not force it on instances.
+package-lock.json

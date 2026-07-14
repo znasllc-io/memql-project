@@ -106,8 +106,21 @@ jobs:
           [ "$code" -eq 2 ] || { echo "expected exit 2 for unknown flag, got $code" >&2; exit 1; }
       - name: dry-run emits success envelope without changing anything
         run: |
+          # Use THIS repo's stamped identity when product.env exists; fall back to
+          # a demo identity in-template (unstamped). A hardcoded demo identity is
+          # REFUSED (exit 3) on any stamped instance -- init.sh's identity guard
+          # rejects a mismatched re-stamp before the dry-run branch -- so the
+          # shipped demo-only form makes this required lane red on every stamped
+          # product (found by fylo-warehouse-os, instance zero; fix owed upstream
+          # in the template so this file can go back to byte-identical).
+          p=demo; o=demo-org
+          if [ -f product.env ]; then
+            # shellcheck disable=SC1091
+            . ./product.env
+            p="$PRODUCT"; o="$PRODUCT_ORG"
+          fi
           before="$(git status --porcelain)"
-          scripts/init.sh --product=demo --product-org=demo-org --skip-clones --dry-run \
+          scripts/init.sh --product="$p" --product-org="$o" --skip-clones --dry-run \
             | jq -e '.ok == true and .result.dryRun == true and .changed == false' > /dev/null
           after="$(git status --porcelain)"
           [ "$before" = "$after" ] || { echo "dry-run mutated the tree" >&2; exit 1; }

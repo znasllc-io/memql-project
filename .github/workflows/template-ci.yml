@@ -46,10 +46,30 @@ jobs:
           stamp_dir="$(mktemp -d)"
           rsync -a --exclude .git ./ "$stamp_dir/"
           cd "$stamp_dir"
+          # Regression guard (#15): plant a NON-template file carrying every
+          # template token. substitute_tree walks only the template-owned
+          # CAP_STAMP_PATHS, so a product repo's own content (fylo has spa/ and
+          # design/) must survive the stamp byte-for-byte. Asserted below.
+          mkdir -p product-content
+          printf '__PRODUCT_ID__ __PRODUCT__ __PRODUCT_ORG__ __DOMAIN__ __ENGINE_REF__ __REGISTRY__\n' \
+            > product-content/notes.md
           scripts/init.sh --product="$PRODUCT" --product-org=demo-org --domain=demo.local --skip-clones \
             | tee /tmp/init.json
           jq -e --arg p "$PRODUCT" '.ok == true and .changed == true and .result.product == $p' /tmp/init.json > /dev/null
           echo "STAMP_DIR=$stamp_dir" >> "$GITHUB_ENV"
+
+      - name: non-template content is left untouched (scoped stamping) (#15)
+        # substitute_tree is scoped to template-owned paths, so the planted decoy
+        # (a __TOKEN__-bearing file outside dsl/client/deploy + the stamped docs)
+        # must be unchanged. Assert byte-for-byte, then remove it so the remaining
+        # steps see the clean stamped tree (e.g. the zero-token grep below).
+        run: |
+          set -euo pipefail
+          cd "$STAMP_DIR"
+          expected='__PRODUCT_ID__ __PRODUCT__ __PRODUCT_ORG__ __DOMAIN__ __ENGINE_REF__ __REGISTRY__'
+          got="$(cat product-content/notes.md)"
+          [ "$got" = "$expected" ] || { echo "ERROR: substitute_tree rewrote non-template content: '$got'" >&2; exit 1; }
+          rm -rf product-content
 
       - name: zero leftover tokens (zero tolerance)
         # Only the ROOT scripts/ is exempt: the stamper (scripts/init.sh)
@@ -68,9 +88,17 @@ jobs:
           fi
 
       - name: zero source-product leakage (copresent|visionarys|fylo)
+        # Guards the PRODUCT SURFACE (dsl/client/deploy + the stamped docs) against
+        # a source product's name baking in. The operational lanes scripts/ and
+        # .github/ are exempt (same spirit as the token grep above dropping
+        # ./scripts/): they are byte-identical template<->instance and legitimately
+        # DOCUMENT the template's own history -- ci.yml's required dry-run fix cites
+        # fylo-warehouse-os as instance zero (memql-project#15), and init.sh's
+        # scoping comment names it as the motivating carrier repo. Neither carries
+        # product identity (both read product.env), so exempting them loses nothing.
         run: |
           cd "$STAMP_DIR"
-          if grep -rniE 'copresent|visionarys|fylo' .; then
+          if grep -rniE 'copresent|visionarys|fylo' . | grep -vE '^\./(scripts|\.github)/'; then
             echo "ERROR: source-product name leaked into the stamped product" >&2
             exit 1
           fi
