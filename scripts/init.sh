@@ -31,7 +31,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/capability.sh"
 cap_init "product.init" "Stamp this template checkout in place into a concrete memQL product: write product.env, rename + substitute tokens, clone engine + cockpit siblings, prune template artifacts."
 cap_spec_param "product"      "product name (required; ^[a-z][a-z0-9-]*$; e.g. 'acme')"
 cap_spec_param "product-org"  "GitHub org/user owning this product repo (required; e.g. 'acme-io')"
-cap_spec_param "domain"       "local front-door domain (default: local.znas.io)"
+cap_spec_param "domain"       "the engine's fixed local domain (leave default for local; it is also the staging/prod public-entry placeholder) (default: local.znas.io)"
 cap_spec_param "engine-ref"   "engine ref to pin (default: latest engine release tag, else main)"
 cap_spec_param "registry"     "container registry for the product bundle + client images (default: empty = local-only)"
 cap_spec_param "cockpit-ref"  "cockpit ref to clone (default: main)"
@@ -108,23 +108,111 @@ function validate_params() {
     return 0
 }
 
+# validate_substitution_values -- the free-form values that flow UNQUOTED into
+# the sed token program + file contents (domain, engine-ref, registry) must not
+# carry sed metacharacters or whitespace. Left unvalidated, `&` in a value is
+# taken by sed as "the matched text" (so --engine-ref='feat/x&y' silently
+# corrupts every overlay), and `|` collides with the sed delimiter (so
+# --domain='a|b' aborts mid-stamp) -- C1. Reject with exit 2 BEFORE any mutation.
+# Allowlists (not denylists) so anything sed- or shell-dangerous is refused:
+#   domain     hostname chars                         [A-Za-z0-9.-]
+#   engine-ref git ref chars (slashes ok, no &|\ ws)  [A-Za-z0-9._/-]
+#   registry   host[:port][/path] chars               [A-Za-z0-9._:/-]
+function validate_substitution_values() {
+    [[ "$DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]] \
+        || cap_fail 2 "invalid --domain '$DOMAIN' (want a hostname: ^[A-Za-z0-9.-]+$; no whitespace or sed metacharacters)"
+    if [[ -n "$ENGINE_REF" ]]; then
+        [[ "$ENGINE_REF" =~ ^[A-Za-z0-9._/-]+$ ]] \
+            || cap_fail 2 "invalid --engine-ref '$ENGINE_REF' (want a git ref: ^[A-Za-z0-9._/-]+$; no whitespace or sed metacharacters)"
+    fi
+    if [[ -n "$REGISTRY_VALUE" ]]; then
+        [[ "$REGISTRY_VALUE" =~ ^[A-Za-z0-9._:/-]+$ ]] \
+            || cap_fail 2 "invalid --registry '$REGISTRY_VALUE' (want host[:port][/path]: ^[A-Za-z0-9._:/-]+$; no whitespace or sed metacharacters)"
+    fi
+    return 0
+}
+
+# read_existing_env -- parse an already-written product.env into the EXISTING_*
+# globals (empty when the file is absent). Line-parsed (not sourced) so a stray
+# shell metacharacter in a hand-edited value can never execute. Underpins the
+# re-run identity guard + value preservation (B1).
+function read_existing_env() {
+    EXISTING_PRODUCT=""; EXISTING_ORG=""; EXISTING_DOMAIN=""
+    EXISTING_ENGINE_REF=""; EXISTING_REGISTRY=""; EXISTING_REGISTRY_SET=0
+    local f="$ROOT/product.env" line k v
+    [[ -f "$f" ]] || return 0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        case "$line" in ''|\#*) continue ;; esac
+        k="${line%%=*}"; v="${line#*=}"
+        case "$k" in
+            PRODUCT)     EXISTING_PRODUCT="$v" ;;
+            PRODUCT_ORG) EXISTING_ORG="$v" ;;
+            DOMAIN)      EXISTING_DOMAIN="$v" ;;
+            ENGINE_REF)  EXISTING_ENGINE_REF="$v" ;;
+            REGISTRY)    EXISTING_REGISTRY="$v"; EXISTING_REGISTRY_SET=1 ;;
+        esac
+    done < "$f"
+    return 0
+}
+
+# reconcile_with_existing_env -- on a re-run (product.env present):
+#   1. REFUSE (exit 3, no mutation) when the requested identity (product/org)
+#      disagrees with the stamped one -- a token-keyed re-stamp would half-apply
+#      and lie (the tree keeps the old dsl/<product>/ + manifests while
+#      product.env + the envelope claim the new name). B1.
+#   2. PRESERVE hand-edited/pinned values: for domain/engine-ref/registry, keep
+#      the value already in product.env UNLESS the corresponding flag was passed
+#      explicitly this run -- so a flagless re-run never re-resolves ENGINE_REF
+#      over the network and rewrites the pin out from under the stamped overlays.
+function reconcile_with_existing_env() {
+    [[ -f "$ROOT/product.env" ]] || return 0
+    read_existing_env
+    if { [[ -n "$EXISTING_PRODUCT" ]] && [[ "$EXISTING_PRODUCT" != "$PRODUCT" ]]; } \
+       || { [[ -n "$EXISTING_ORG" ]] && [[ "$EXISTING_ORG" != "$PRODUCT_ORG" ]]; }; then
+        cap_fail 3 "product.env is already stamped as '${EXISTING_PRODUCT}/${EXISTING_ORG}'; refusing to re-stamp as '${PRODUCT}/${PRODUCT_ORG}' (a different identity) -- a token-keyed re-run would half-apply and leave the tree inconsistent. Re-run with the original identity, or start from a fresh template checkout."
+    fi
+    [[ -z "$DOMAIN_FLAG"     && -n "$EXISTING_DOMAIN"     ]] && DOMAIN="$EXISTING_DOMAIN"
+    [[ -z "$ENGINE_REF_FLAG" && -n "$EXISTING_ENGINE_REF" ]] && ENGINE_REF="$EXISTING_ENGINE_REF"
+    [[ -z "$REGISTRY_FLAG"   && "$EXISTING_REGISTRY_SET" == "1" ]] && REGISTRY_VALUE="$EXISTING_REGISTRY"
+    return 0
+}
+
 # resolve_engine_ref -> echoes the ref to pin. Explicit param wins; else the
 # latest semver tag on the engine repo; else main.
+#
+# The engine tag set MIXES v-prefixed ('v0.9.6') and bare ('0.11.2') tags. A
+# naive `sort -V` sorts every 'v...' string AFTER every bare-numeric string, so
+# the newest bare release (0.11.2) loses to a far older v-tag (v0.9.6) -- the
+# instance then pins a runtime engine that cannot load the starter (B3). Fix:
+# sort on a v-STRIPPED key (field 1) while keeping the ORIGINAL tag string
+# (field 2) for the pin, so 'v0.9.6' and '0.9.6' compare by semver but whichever
+# real tag is newest is what we return verbatim.
 function resolve_engine_ref() {
     if [[ -n "$ENGINE_REF" ]]; then printf '%s' "$ENGINE_REF"; return; fi
     local latest
     latest="$(git ls-remote --tags --refs "$ENGINE_REPO" 2>/dev/null \
         | awk -F/ '{print $NF}' \
         | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' \
-        | sort -V | tail -1 || true)"
+        | awk '{orig=$0; norm=$0; sub(/^v/,"",norm); print norm"\t"orig}' \
+        | sort -V -k1,1 \
+        | tail -1 \
+        | cut -f2 || true)"
     printf '%s' "${latest:-main}"
 }
+
+# PRODUCT_ID -- an identifier-safe form of the product name (hyphens -> under-
+# scores) for positions that must be a valid JS/TS/Go identifier, e.g. the
+# generated concepts.ts object KEYS (demo-app_GREETING is a syntax error; the
+# `v1:demo-app:greeting` string VALUE is fine and keeps __PRODUCT__). Non-
+# hyphenated names are unchanged, so this is a no-op for the common case (B5).
+PRODUCT_ID=""   # set in main() once PRODUCT is known
 
 # substitute_tokens_in_string <string> -- for path renames.
 function substitute_tokens_in_string() {
     local s="$1"
-    s="${s//__PRODUCT__/$PRODUCT}"
+    s="${s//__PRODUCT_ID__/$PRODUCT_ID}"
     s="${s//__PRODUCT_ORG__/$PRODUCT_ORG}"
+    s="${s//__PRODUCT__/$PRODUCT}"
     s="${s//__DOMAIN__/$DOMAIN}"
     s="${s//__ENGINE_REF__/$RESOLVED_ENGINE_REF}"
     s="${s//__REGISTRY__/$REGISTRY_VALUE}"
@@ -132,13 +220,14 @@ function substitute_tokens_in_string() {
 }
 
 # sed_token_program -- the shared sed expression list (used for file contents).
+# __PRODUCT_ID__ is substituted first (longest, non-overlapping with __PRODUCT__).
 # __REGISTRY__ uses REGISTRY_MANIFEST, which is the real registry when set and a
 # fail-closed placeholder (registry.example.com) when local-only, so the
 # staging/prod overlays always render a VALID image ref (no leading-slash name)
 # even though product.env REGISTRY stays empty for a local-only product.
 function sed_token_program() {
-    printf 's|__PRODUCT_ORG__|%s|g; s|__PRODUCT__|%s|g; s|__DOMAIN__|%s|g; s|__ENGINE_REF__|%s|g; s|__REGISTRY__|%s|g' \
-        "$PRODUCT_ORG" "$PRODUCT" "$DOMAIN" "$RESOLVED_ENGINE_REF" "$REGISTRY_MANIFEST"
+    printf 's|__PRODUCT_ID__|%s|g; s|__PRODUCT_ORG__|%s|g; s|__PRODUCT__|%s|g; s|__DOMAIN__|%s|g; s|__ENGINE_REF__|%s|g; s|__REGISTRY__|%s|g' \
+        "$PRODUCT_ID" "$PRODUCT_ORG" "$PRODUCT" "$DOMAIN" "$RESOLVED_ENGINE_REF" "$REGISTRY_MANIFEST"
 }
 
 # is_skipped <relpath> -- true if the path is an operational file/dir init must
@@ -208,7 +297,7 @@ function substitute_tree() {
     while IFS= read -r -d '' f; do
         rel="${f#"$ROOT"/}"
         is_skipped "$rel" && continue
-        grep -q '__PRODUCT__\|__PRODUCT_ORG__\|__DOMAIN__\|__ENGINE_REF__\|__REGISTRY__' "$f" 2>/dev/null || continue
+        grep -q '__PRODUCT_ID__\|__PRODUCT__\|__PRODUCT_ORG__\|__DOMAIN__\|__ENGINE_REF__\|__REGISTRY__' "$f" 2>/dev/null || continue
         tmp="$(mktemp)"
         sed -e "$prog" "$f" > "$tmp"
         if cmp -s "$tmp" "$f"; then
@@ -283,6 +372,15 @@ function replace_readme() {
         printf 'git fetch template\n'
         printf 'git merge template/main --allow-unrelated-histories   # first time only\n'
         printf '```\n\n'
+        printf 'The first `--allow-unrelated-histories` merge pulls the template'"'"'s\n'
+        printf 'PRE-STAMP tree, so it resurrects what init.sh pruned/renamed: the\n'
+        printf 'template placeholder DSL directory (next to your `dsl/%s/`),\n' "$PRODUCT"
+        printf '`template-ci.yml`, `product.env.example`, and the placeholder ArgoCD\n'
+        printf 'app files under `deploy/argocd/apps/`. Re-prune and commit them after\n'
+        printf 'the first sync (runtime is safe meanwhile -- the engine skips\n'
+        printf '`_`-prefixed DSL domains); later syncs are ordinary merges with\n'
+        printf 'modify/delete conflicts on those paths -- keep them deleted. See\n'
+        printf '`ONBOARDING.md` for the exact commands.\n\n'
         printf 'See `ONBOARDING.md` for the development workflow and `CLAUDE.md` for the\n'
         printf 'repo agent guide.\n'
     } > "$tmp"
@@ -353,8 +451,21 @@ function main() {
     SKIP_CLONES="$(cap_flag skip-clones)"
     DRY_RUN="$(cap_flag dry-run)"
 
+    # Was the flag passed explicitly this run? (empty = not passed) -- drives the
+    # B1 value-preservation rule (preserve product.env's value unless overridden).
+    DOMAIN_FLAG="$(cap_flag domain)"
+    ENGINE_REF_FLAG="$(cap_flag engine-ref)"
+    REGISTRY_FLAG="$(cap_flag registry)"
+
     validate_params
     require_prerequisites
+    # Re-run reconciliation BEFORE resolving/validating/mutating: refuse an
+    # identity change (exit 3) and preserve pinned values so a flagless re-run is
+    # a true no-op (B1). Must precede resolve_engine_ref so preserved refs are
+    # not re-resolved over the network.
+    reconcile_with_existing_env
+    validate_substitution_values
+    PRODUCT_ID="${PRODUCT//-/_}"     # identifier-safe form for JS/TS/Go id positions (B5)
     RESOLVED_ENGINE_REF="$(resolve_engine_ref)"
     # Real registry when set; a fail-closed placeholder for local-only products
     # so staging/prod overlays still render a valid image ref (they also pin
