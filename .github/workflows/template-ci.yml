@@ -21,35 +21,48 @@ permissions:
 # gitleaks `scan`.
 jobs:
   init-smoke:
-    name: init-smoke
+    name: init-smoke (${{ matrix.product }})
     if: github.repository == 'znasllc-io/memql-project'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # A plain slug AND a hyphenated one. The hyphenated case gates B5: a
+        # hyphen is legal in --product but illegal in a JS/TS identifier, so the
+        # generated concepts.ts KEYS must be stamped through the identifier-safe
+        # __PRODUCT_ID__ form (hyphens -> underscores) or client typecheck fails.
+        product: [demo, demo-app]
+    env:
+      PRODUCT: ${{ matrix.product }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4
         with:
           node-version: '20'
 
-      - name: stamp a demo product in a temp copy
+      - name: stamp the product in a temp copy
         run: |
           set -euo pipefail
           stamp_dir="$(mktemp -d)"
           rsync -a --exclude .git ./ "$stamp_dir/"
           cd "$stamp_dir"
-          scripts/init.sh --product=demo --product-org=demo-org --domain=demo.local --skip-clones \
+          scripts/init.sh --product="$PRODUCT" --product-org=demo-org --domain=demo.local --skip-clones \
             | tee /tmp/init.json
-          jq -e '.ok == true and .changed == true and .result.product == "demo"' /tmp/init.json > /dev/null
+          jq -e --arg p "$PRODUCT" '.ok == true and .changed == true and .result.product == $p' /tmp/init.json > /dev/null
           echo "STAMP_DIR=$stamp_dir" >> "$GITHUB_ENV"
 
       - name: zero leftover tokens (zero tolerance)
-        # scripts/ is excluded: the stamper (scripts/init.sh) legitimately
-        # references the token literals it substitutes; it is operational and
-        # byte-identical to the template. Everything init is meant to stamp
-        # (dsl/deploy/client/docs) must be token-free.
+        # Only the ROOT scripts/ is exempt: the stamper (scripts/init.sh)
+        # legitimately references the token literals it substitutes. A blanket
+        # --exclude-dir=scripts also blinds the check to client/scripts/ (C3), so
+        # instead grep the whole tree and drop only matches under ./scripts/.
+        # Everything init is meant to stamp (dsl/deploy/client/docs) must be
+        # token-free, __PRODUCT_ID__ included.
         run: |
           cd "$STAMP_DIR"
-          if grep -rn --exclude-dir=scripts --exclude-dir=node_modules \
-              '__PRODUCT__\|__PRODUCT_ORG__\|__DOMAIN__\|__ENGINE_REF__\|__ENGINE_VERSION__\|__REGISTRY__' .; then
+          if grep -rn --exclude-dir=node_modules \
+              '__PRODUCT_ID__\|__PRODUCT__\|__PRODUCT_ORG__\|__DOMAIN__\|__ENGINE_REF__\|__ENGINE_VERSION__\|__REGISTRY__' . \
+              | grep -vE '^\./scripts/'; then
             echo "ERROR: unsubstituted template token in the stamped product" >&2
             exit 1
           fi
@@ -65,11 +78,11 @@ jobs:
       - name: structural assertions (renames + product.env + prune)
         run: |
           cd "$STAMP_DIR"
-          test -d dsl/demo
+          test -d "dsl/$PRODUCT"
           test ! -e dsl/__PRODUCT__
-          test -f deploy/argocd/apps/demo-staging.yaml
-          test -f deploy/argocd/apps/demo-prod.yaml
-          test -f product.env && grep -qx 'PRODUCT=demo' product.env
+          test -f "deploy/argocd/apps/$PRODUCT-staging.yaml"
+          test -f "deploy/argocd/apps/$PRODUCT-prod.yaml"
+          test -f product.env && grep -qx "PRODUCT=$PRODUCT" product.env
           test ! -e product.env.example
           test ! -e .github/workflows/template-ci.yml   # pruned in the stamped copy
 
@@ -80,7 +93,19 @@ jobs:
             kubectl kustomize "$STAMP_DIR/deploy/k8s/overlays/$o" > /dev/null
           done
 
-      - name: client npm install + build + lint (stamped, self-contained)
+      - name: staging/prod render with identity ENABLED (B2)
+        # Authentication must be ON in the public-facing overlays; a rendered
+        # MEMQL_IDENTITY_ENABLED="false" would ship the internet-exposed bff with
+        # auth disabled. Assert the product bff's value is "true" in both.
+        run: |
+          set -euo pipefail
+          for o in staging prod; do
+            kubectl kustomize "$STAMP_DIR/deploy/k8s/overlays/$o" > "/tmp/render-$o.yaml"
+            v="$(grep -A1 'name: MEMQL_IDENTITY_ENABLED' "/tmp/render-$o.yaml" | grep -m1 'value:' | sed 's/.*value: *//; s/"//g')"
+            [ "$v" = "true" ] || { echo "ERROR: $o renders MEMQL_IDENTITY_ENABLED=$v (want true)" >&2; exit 1; }
+          done
+
+      - name: client npm install + typecheck + build + lint (stamped, self-contained)
         working-directory: ${{ env.STAMP_DIR }}/client
         run: |
           npm install --no-audit --no-fund
@@ -91,8 +116,21 @@ jobs:
       - name: idempotent re-run reports changed:false
         run: |
           cd "$STAMP_DIR"
-          scripts/init.sh --product=demo --product-org=demo-org --domain=demo.local --skip-clones \
+          scripts/init.sh --product="$PRODUCT" --product-org=demo-org --domain=demo.local --skip-clones \
             | jq -e '.ok == true and .changed == false' > /dev/null
+
+      - name: re-stamp with a different identity is refused (exit 3, no mutation) (B1)
+        run: |
+          set -uo pipefail
+          cd "$STAMP_DIR"
+          before="$(find . -path ./client/node_modules -prune -o -type f -print | sort | xargs cksum 2>/dev/null | cksum)"
+          set +e
+          out="$(scripts/init.sh --product=other --product-org=demo-org --skip-clones 2>/dev/null)"; code=$?
+          set -e
+          after="$(find . -path ./client/node_modules -prune -o -type f -print | sort | xargs cksum 2>/dev/null | cksum)"
+          [ "$code" -eq 3 ] || { echo "ERROR: identity change exit=$code (want 3)" >&2; exit 1; }
+          echo "$out" | jq -e '.ok == false and .error.code == 3' > /dev/null
+          [ "$before" = "$after" ] || { echo "ERROR: refused re-run mutated the tree" >&2; exit 1; }
 
   stamped-dsl:
     name: stamped-dsl
@@ -112,8 +150,20 @@ jobs:
           cd "$stamp_dir"
           scripts/init.sh --product=demo --product-org=demo-org --skip-clones > /dev/null
           echo "STAMP_DIR=$stamp_dir" >> "$GITHUB_ENV"
-      - name: memqllint the stamped DSL against the engine
+      - name: memqllint the stamped DSL at the STAMPED engine ref (B4)
+        # The instance PINS an engine ref in product.env (ENGINE_REF); a stamped
+        # tree is only meaningful against THAT ref, never engine main. Reading the
+        # ref here (mirroring ci.yml's dsl lane) is what proves a default stamp is
+        # self-consistent -- and is precisely the gate that would have caught B3.
         run: |
           set -euo pipefail
-          git clone --depth 1 https://github.com/znasllc-io/memql.git /tmp/memql
+          ref=main
+          if [ -f "$STAMP_DIR/product.env" ]; then
+            # shellcheck disable=SC1091
+            . "$STAMP_DIR/product.env"
+            [ -n "${ENGINE_REF:-}" ] && ref="$ENGINE_REF"
+          fi
+          echo "linting the stamped DSL against engine ref: $ref"
+          git clone --depth 1 --branch "$ref" https://github.com/znasllc-io/memql.git /tmp/memql \
+            || { echo "ERROR: failed to clone engine at pinned ref '$ref'" >&2; exit 1; }
           cd /tmp/memql && go run ./cmd/memqllint "$STAMP_DIR/dsl/demo"

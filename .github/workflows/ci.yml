@@ -151,13 +151,24 @@ jobs:
         run: |
           set -euo pipefail
           for o in staging prod; do
-            # Product images (the DSL bundle + the client SPA) must be digest-pinned.
-            bad="$(grep -E '^\s*(-?\s*)?image:.*(-dsl-bundle|-client)' "/tmp/render-$o.yaml" | grep -v '@sha256:' || true)"
-            if [ -n "$bad" ]; then
-              echo "ERROR: $o overlay has a floating (non-digest) product image:" >&2
-              echo "$bad" >&2
+            # Both product images (the DSL bundle + the client SPA) MUST render
+            # AND every product-image line MUST be digest-pinned. The positive
+            # count assertion (C4) stops the gate passing vacuously if an image
+            # name drifts so the grep matches nothing.
+            imgs="$(grep -E '^\s*(-?\s*)?image:.*(-dsl-bundle|-client)' "/tmp/render-$o.yaml" || true)"
+            n="$(printf '%s\n' "$imgs" | grep -c . || true)"
+            if [ "$n" -lt 2 ]; then
+              echo "ERROR: $o overlay rendered $n product image(s); expected >=2 (the DSL bundle + the client). Image names may have drifted:" >&2
+              printf '%s\n' "$imgs" >&2
               exit 1
             fi
+            bad="$(printf '%s\n' "$imgs" | grep -v '@sha256:' || true)"
+            if [ -n "$bad" ]; then
+              echo "ERROR: $o overlay has a floating (non-digest) product image:" >&2
+              printf '%s\n' "$bad" >&2
+              exit 1
+            fi
+            echo "$o: $n product image(s), all digest-pinned"
           done
           # The local overlay is exempt: it uses mutable :local tags for k3d import.
           grep -qE 'dsl-bundle:local' /tmp/render-local.yaml
@@ -175,29 +186,53 @@ jobs:
           go-version: '1.26.4'
           cache: false
       # Best-available no-Go-repo validation: the engine's own load pipeline via
-      # `go run ./cmd/memqllint` against a sibling engine clone. It checks parse
-      # + import-graph integrity for the procedural kinds (query/mutation/logic/
-      # automation/spec/trait); it does NOT resolve executor names or validate
-      # builtin/tool bodies (a live boot does). Engine ref from product.env if
-      # present (a stamped instance), else main (in-template).
-      - name: clone the engine (for memqllint)
+      # `go run ./cmd/memqllint` against a sibling engine clone. HONEST SCOPE: it
+      # is PARSE-ONLY for the Form B `use` imports the starter uses (the import
+      # graph is not deeply resolved for that form) -- it does NOT resolve
+      # executor names or validate builtin/tool bodies; a live boot does. The
+      # engine gap (deeper standalone validation for a no-Go repo) is tracked in
+      # znasllc-io/memql#2509.
+      #
+      # Engine ref: the pinned ENGINE_REF from product.env (a stamped instance),
+      # else the SAME default init.sh would pin -- the latest engine RELEASE TAG,
+      # NOT main. The starter DSL is authored for the pinned/latest-tag grammar;
+      # engine main moves ahead of releases (e.g. call-arg syntax), so linting the
+      # starter against main would test a combination no instance ever runs -- the
+      # same class of false-green as B4. Falling back to a silent main clone on a
+      # pinned-ref failure is removed (C2): a failed clone of a known ref is fatal.
+      - name: clone the engine at the pinned/default ref (for memqllint)
         run: |
-          ref=main
+          set -euo pipefail
+          ref=""
           if [ -f product.env ]; then
             # shellcheck disable=SC1091
             . ./product.env
             [ -n "${ENGINE_REF:-}" ] && ref="$ENGINE_REF"
           fi
+          if [ -z "$ref" ]; then
+            # Mirror init.sh resolve_engine_ref: newest semver tag (v-stripped
+            # sort key, original tag kept), else main.
+            ref="$(git ls-remote --tags --refs https://github.com/znasllc-io/memql.git 2>/dev/null \
+              | awk -F/ '{print $NF}' \
+              | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' \
+              | awk '{orig=$0; norm=$0; sub(/^v/,"",norm); print norm"\t"orig}' \
+              | sort -V -k1,1 | tail -1 | cut -f2 || true)"
+            [ -n "$ref" ] || ref=main
+          fi
           echo "engine ref: $ref"
           git clone --depth 1 --branch "$ref" https://github.com/znasllc-io/memql.git /tmp/memql \
-            || git clone --depth 1 https://github.com/znasllc-io/memql.git /tmp/memql
-      - name: memqllint the product DSL tree
+            || { echo "ERROR: failed to clone engine at ref '$ref' -- refusing to fall back to main" >&2; exit 1; }
+      - name: memqllint every product DSL domain
         run: |
           set -euo pipefail
-          dsl_dir="$(find "$PWD/dsl" -mindepth 1 -maxdepth 1 -type d | head -1)"
-          [ -n "$dsl_dir" ] || { echo "no dsl/<domain> dir found" >&2; exit 1; }
-          echo "linting: $dsl_dir"
-          cd /tmp/memql && go run ./cmd/memqllint "$dsl_dir"
+          mapfile -t dsl_dirs < <(find "$PWD/dsl" -mindepth 1 -maxdepth 1 -type d | sort)
+          [ "${#dsl_dirs[@]}" -gt 0 ] || { echo "no dsl/<domain> dir found" >&2; exit 1; }
+          echo "linting ${#dsl_dirs[@]} domain(s): ${dsl_dirs[*]}"
+          cd /tmp/memql
+          for d in "${dsl_dirs[@]}"; do
+            echo "==> memqllint $d"
+            go run ./cmd/memqllint "$d"
+          done
 
   ci-required:
     name: ci-required
