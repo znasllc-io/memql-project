@@ -85,14 +85,19 @@ function import_image() {
 }
 
 function roll_deployment() {
+    # First bring-up: the Deployment does not exist yet. `make up` imports this
+    # image (step 3) BEFORE it registers the product Application (step 4), which
+    # is what CREATES the Deployment -- so nothing exists to roll here, and
+    # ArgoCD will create it from the freshly-imported image on first sync
+    # (imagePullPolicy: IfNotPresent finds the imported tag). SKIP, do not wait:
+    # blocking here deadlocks `make up` (step 4 can never run until step 3
+    # returns, but the Deployment only appears in step 4).
     if ! kubectl get deploy "${PRODUCT}" -n "${NAMESPACE}" &>/dev/null; then
-        info "Waiting for ArgoCD to create the ${PRODUCT} Deployment..."
-        local waited=0
-        while ! kubectl get deploy "${PRODUCT}" -n "${NAMESPACE}" &>/dev/null; do
-            sleep 5; waited=$((waited + 5))
-            [ "${waited}" -ge 120 ] && { info "${PRODUCT} Deployment not found after ${waited}s -- is the product Application synced? (make -C .. up)"; return 1; }
-        done
+        info "${PRODUCT} Deployment not present yet -- skipping roll; ArgoCD creates it from the imported ${IMAGE} on first sync (make up registers the product Application after this step)."
+        return 0
     fi
+    # Re-import (make dev, or a repeat make up): the Deployment already exists,
+    # so roll it to pick up the freshly re-imported image tag.
     info "Rolling the ${PRODUCT} Deployment..."
     kubectl rollout restart "deploy/${PRODUCT}" -n "${NAMESPACE}" >&2
     kubectl rollout status "deploy/${PRODUCT}" -n "${NAMESPACE}" --timeout="${WAIT_TIMEOUT}s" >&2
