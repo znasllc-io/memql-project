@@ -138,13 +138,22 @@ jobs:
       # generated concepts module), so it depends on zero private SDKs: npm
       # install needs NO NODE_AUTH_TOKEN and the full typecheck+build+lint run
       # unconditionally, in-template (unstamped) and in every stamped instance.
-      - name: npm install + typecheck + build + lint
+      # The test step runs ONLY when the client defines a `test` script: a
+      # product that drops in a vitest/jest suite rides it on this lane
+      # automatically, while the starter (which ships no test script) skips it
+      # gracefully so the lane stays green in-template.
+      - name: npm install + typecheck + build + lint (+ test when defined)
         working-directory: client
         run: |
           npm install --no-audit --no-fund
           npm run typecheck
           npm run build
           npm run lint
+          if [ "$(jq -r '.scripts.test // empty' package.json)" ]; then
+            npm test
+          else
+            echo "no client test script defined -- skipping npm test"
+          fi
 
   deploy:
     name: deploy

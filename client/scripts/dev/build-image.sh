@@ -51,10 +51,31 @@ function build_image() {
     if [ -n "${NODE_AUTH_TOKEN:-}" ]; then
         secret_arg=(--secret "id=node_auth_token,env=NODE_AUTH_TOKEN")
     fi
+
+    # Forward only the build args the client Dockerfile actually declares. This
+    # file is byte-identical across products, but each app trims the Dockerfile's
+    # ARG list to the VITE_* values it reads; passing a --build-arg the Dockerfile
+    # no longer declares makes docker warn ("build-arg was not consumed") and
+    # couples this shared script to one product's Dockerfile. So read the declared
+    # `ARG VITE_*` names and, for each, forward its value from the environment (an
+    # explicit override), falling back to the local bootstrap envelope defaults
+    # for the two backend URLs the starter bakes.
+    local build_args=()
+    local name value
+    while IFS= read -r name; do
+        value="${!name:-}"
+        if [ -z "$value" ]; then
+            case "$name" in
+                VITE_MEMQL_HTTP_URL)    value="https://bff.${DOMAIN}" ;;
+                VITE_IDENTITY_BASE_URL) value="https://identity.${DOMAIN}" ;;
+            esac
+        fi
+        [ -n "$value" ] && build_args+=(--build-arg "${name}=${value}")
+    done < <(awk '/^ARG[[:space:]]+VITE_/ { n=$2; sub(/=.*/, "", n); print n }' "${CLIENT_ROOT}/Dockerfile")
+
     docker build \
-        "${secret_arg[@]}" \
-        --build-arg VITE_MEMQL_HTTP_URL="https://bff.${DOMAIN}" \
-        --build-arg VITE_IDENTITY_BASE_URL="https://identity.${DOMAIN}" \
+        ${secret_arg[@]+"${secret_arg[@]}"} \
+        ${build_args[@]+"${build_args[@]}"} \
         -t "${IMAGE}" "${CLIENT_ROOT}" >&2
 }
 
