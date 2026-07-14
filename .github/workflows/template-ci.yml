@@ -48,8 +48,8 @@ jobs:
           cd "$stamp_dir"
           # Regression guard (#15): plant a NON-template file carrying every
           # template token. substitute_tree walks only the template-owned
-          # CAP_STAMP_PATHS, so a product repo's own content (fylo has spa/ and
-          # design/) must survive the stamp byte-for-byte. Asserted below.
+          # CAP_STAMP_PATHS, so a product repo's own non-template content must
+          # survive the stamp byte-for-byte. Asserted below.
           mkdir -p product-content
           printf '__PRODUCT_ID__ __PRODUCT__ __PRODUCT_ORG__ __DOMAIN__ __ENGINE_REF__ __REGISTRY__\n' \
             > product-content/notes.md
@@ -88,17 +88,15 @@ jobs:
           fi
 
       - name: zero source-product leakage (copresent|visionarys|fylo)
-        # Guards the PRODUCT SURFACE (dsl/client/deploy + the stamped docs) against
-        # a source product's name baking in. The operational lanes scripts/ and
-        # .github/ are exempt (same spirit as the token grep above dropping
-        # ./scripts/): they are byte-identical template<->instance and legitimately
-        # DOCUMENT the template's own history -- ci.yml's required dry-run fix cites
-        # fylo-warehouse-os as instance zero (memql-project#15), and init.sh's
-        # scoping comment names it as the motivating carrier repo. Neither carries
-        # product identity (both read product.env), so exempting them loses nothing.
+        # FULL-TREE gate (no exemptions): NO source/sibling product name may appear
+        # ANYWHERE in a stamped product -- these clients are stamped for an agency
+        # and must never reference one another. Operational files are de-named too
+        # (ci.yml + init.sh cite "instance zero, memql-project#15", not the instance
+        # repo), so the whole stamped tree -- product surface AND plumbing -- stays
+        # clean. Keep it that way: reference issues, never sibling client names.
         run: |
           cd "$STAMP_DIR"
-          if grep -rniE 'copresent|visionarys|fylo' . | grep -vE '^\./(scripts|\.github)/'; then
+          if grep -rniE 'copresent|visionarys|fylo' .; then
             echo "ERROR: source-product name leaked into the stamped product" >&2
             exit 1
           fi

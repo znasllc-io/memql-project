@@ -92,10 +92,10 @@ CAP_SKIP_PATHS=(
 )
 
 # Template-owned paths substitute_tree is ALLOWED to stamp (an allowlist, walked
-# instead of the whole repo root). A product repo may carry its own non-template
-# content (fylo has spa/ and design/) whose files can legitimately contain
-# __TOKEN__-looking literals; walking only these paths guarantees such content is
-# never silently rewritten. is_skipped still applies WITHIN them (e.g. it keeps
+# instead of the whole repo root). A product repo can carry non-template content
+# of its own whose files may contain token-like literals; walking only these
+# paths guarantees such content is never silently rewritten. is_skipped still
+# applies WITHIN them (e.g. it keeps
 # client/scripts/, client/Makefile, client/.gitignore byte-identical). Paths are
 # relative to ROOT; a directory is stamped recursively, a bare file on its own.
 # This list must stay in sync with print_dry_run_plan's "would stamp:" line and

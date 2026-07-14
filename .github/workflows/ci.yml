@@ -109,10 +109,9 @@ jobs:
           # Use THIS repo's stamped identity when product.env exists; fall back to
           # a demo identity in-template (unstamped). A hardcoded demo identity is
           # REFUSED (exit 3) on any stamped instance -- init.sh's identity guard
-          # rejects a mismatched re-stamp before the dry-run branch -- so the
-          # shipped demo-only form makes this required lane red on every stamped
-          # product (found by fylo-warehouse-os, instance zero; fix owed upstream
-          # in the template so this file can go back to byte-identical).
+          # rejects a mismatched re-stamp before the dry-run branch -- so a
+          # demo-only form would make this required lane red on every stamped
+          # product (found by instance zero, memql-project#15).
           p=demo; o=demo-org
           if [ -f product.env ]; then
             # shellcheck disable=SC1091
