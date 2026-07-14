@@ -91,6 +91,23 @@ CAP_SKIP_PATHS=(
     "README.md"
 )
 
+# Template-owned paths substitute_tree is ALLOWED to stamp (an allowlist, walked
+# instead of the whole repo root). A product repo can carry non-template content
+# of its own whose files may contain token-like literals; walking only these
+# paths guarantees such content is never silently rewritten. is_skipped still
+# applies WITHIN them (e.g. it keeps
+# client/scripts/, client/Makefile, client/.gitignore byte-identical). Paths are
+# relative to ROOT; a directory is stamped recursively, a bare file on its own.
+# This list must stay in sync with print_dry_run_plan's "would stamp:" line and
+# with rename_token_paths (dsl/, deploy/ hold the token-bearing renamed paths).
+CAP_STAMP_PATHS=(
+    "dsl"
+    "client"
+    "deploy"
+    "ONBOARDING.md"
+    "CLAUDE.md"
+)
+
 #=============================================================================
 # FUNCTIONS
 #=============================================================================
@@ -334,9 +351,20 @@ function rename_token_paths() {
 
 # substitute_tree -- substitute tokens in the CONTENTS of every non-skipped file
 # that currently contains a token. Idempotent: a file with no tokens is a no-op.
+# SCOPE: walks ONLY the template-owned CAP_STAMP_PATHS, never the whole repo root,
+# so a product repo's own content (its app, design assets) keeps any __TOKEN__-
+# looking literals verbatim. is_skipped still runs as a secondary guard for the
+# operational files nested inside those paths (e.g. client/scripts/).
 function substitute_tree() {
-    local prog rel tmp
+    local prog rel tmp p roots=()
     prog="$(sed_token_program)"
+    for p in "${CAP_STAMP_PATHS[@]}"; do
+        [[ -e "$ROOT/$p" ]] && roots+=("$ROOT/$p")
+    done
+    if [[ ${#roots[@]} -eq 0 ]]; then
+        cap_step "no template-owned paths present to substitute"
+        return 0
+    fi
     # -print0/read -d '' keeps paths with spaces safe; bash 3.2 compatible.
     while IFS= read -r -d '' f; do
         rel="${f#"$ROOT"/}"
@@ -352,8 +380,8 @@ function substitute_tree() {
             rm -f "$tmp"
             cap_changed
         fi
-    done < <(find "$ROOT" -type f -not -path '*/.git/*' -print0)
-    cap_step "substituted tokens across the product tree"
+    done < <(find "${roots[@]}" -type f -not -path '*/.git/*' -print0)
+    cap_step "substituted tokens across template-owned paths"
 }
 
 # clone_sibling <url> <dir> <ref> -- idempotent sibling clone into PARENT.

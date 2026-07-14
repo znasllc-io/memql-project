@@ -44,6 +44,15 @@ export class MemqlClient {
 
   private wsUrl(): string {
     const base = this.opts.httpUrl.replace(/^http/, "ws").replace(/\/$/, "");
+    // SECURITY (known risk, engine-gated -- znasllc-io/memql#2511): the bearer
+    // token rides the WS URL as a `?token=` query param. URLs are routinely
+    // logged by ingresses, reverse proxies, and browser history, so the token can
+    // leak into access logs. The WS handshake contract is engine-owned, so the
+    // template cannot move the token off the URL until the engine accepts an
+    // alternative (a Sec-WebSocket-Protocol bearer subprotocol or a short-lived
+    // ticket exchange) -- tracked in znasllc-io/memql#2511. MITIGATION until then:
+    // configure the ingress/proxy fronting /memql/ws to DROP the query string
+    // from its access-log format (see client/README.md "WebSocket auth" note).
     const q = this.opts.token ? `?token=${encodeURIComponent(this.opts.token)}` : "";
     return `${base}/memql/ws${q}`;
   }

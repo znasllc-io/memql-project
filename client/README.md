@@ -58,6 +58,26 @@ no dependency on an unpublished package**.
    rows; `topicFor` / `filterFor` for subscriptions) is identical, so the swap is
    mechanical.
 
+## WebSocket auth (known risk, engine-gated)
+
+The starter memQL client (`src/lib/memql/client.ts`) dials the engine's WS bridge
+as `wss://.../memql/ws?token=<JWT>` -- the bearer token rides the **URL query
+string**. URLs are routinely captured by ingress/proxy access logs and browser
+history, so the token can leak into logs.
+
+The WS handshake contract is **engine-owned**, so this template cannot move the
+token off the URL until the engine accepts an alternative (a
+`Sec-WebSocket-Protocol` bearer subprotocol or a short-lived ticket exchange).
+That work is tracked engine-side in **znasllc-io/memql#2511**; when it lands, swap
+the client to the new handshake.
+
+**Until then, mitigate at the edge:** configure the ingress / reverse proxy that
+fronts `/memql/ws` to **drop the query string** from its access-log format so the
+token is never written to disk. For example, log the path without its query
+(nginx: log `$uri` rather than `$request`/`$request_uri` for that location), and
+audit any proxy or APM in front of it for the same. Prefer `wss://` end to end so
+the token is never on the wire in clear text.
+
 ## Local development
 
 Prerequisites: Node ≥ 20, and the engine checked out as a sibling of the repo

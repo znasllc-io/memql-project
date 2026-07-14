@@ -46,10 +46,30 @@ jobs:
           stamp_dir="$(mktemp -d)"
           rsync -a --exclude .git ./ "$stamp_dir/"
           cd "$stamp_dir"
+          # Regression guard (#15): plant a NON-template file carrying every
+          # template token. substitute_tree walks only the template-owned
+          # CAP_STAMP_PATHS, so a product repo's own non-template content must
+          # survive the stamp byte-for-byte. Asserted below.
+          mkdir -p product-content
+          printf '__PRODUCT_ID__ __PRODUCT__ __PRODUCT_ORG__ __DOMAIN__ __ENGINE_REF__ __REGISTRY__\n' \
+            > product-content/notes.md
           scripts/init.sh --product="$PRODUCT" --product-org=demo-org --domain=demo.local --skip-clones \
             | tee /tmp/init.json
           jq -e --arg p "$PRODUCT" '.ok == true and .changed == true and .result.product == $p' /tmp/init.json > /dev/null
           echo "STAMP_DIR=$stamp_dir" >> "$GITHUB_ENV"
+
+      - name: non-template content is left untouched (scoped stamping) (#15)
+        # substitute_tree is scoped to template-owned paths, so the planted decoy
+        # (a __TOKEN__-bearing file outside dsl/client/deploy + the stamped docs)
+        # must be unchanged. Assert byte-for-byte, then remove it so the remaining
+        # steps see the clean stamped tree (e.g. the zero-token grep below).
+        run: |
+          set -euo pipefail
+          cd "$STAMP_DIR"
+          expected='__PRODUCT_ID__ __PRODUCT__ __PRODUCT_ORG__ __DOMAIN__ __ENGINE_REF__ __REGISTRY__'
+          got="$(cat product-content/notes.md)"
+          [ "$got" = "$expected" ] || { echo "ERROR: substitute_tree rewrote non-template content: '$got'" >&2; exit 1; }
+          rm -rf product-content
 
       - name: zero leftover tokens (zero tolerance)
         # Only the ROOT scripts/ is exempt: the stamper (scripts/init.sh)
@@ -68,6 +88,12 @@ jobs:
           fi
 
       - name: zero source-product leakage (copresent|visionarys|fylo)
+        # FULL-TREE gate (no exemptions): NO source/sibling product name may appear
+        # ANYWHERE in a stamped product -- these clients are stamped for an agency
+        # and must never reference one another. Operational files are de-named too
+        # (ci.yml + init.sh cite "instance zero, memql-project#15", not the instance
+        # repo), so the whole stamped tree -- product surface AND plumbing -- stays
+        # clean. Keep it that way: reference issues, never sibling client names.
         run: |
           cd "$STAMP_DIR"
           if grep -rniE 'copresent|visionarys|fylo' .; then
@@ -103,6 +129,23 @@ jobs:
             kubectl kustomize "$STAMP_DIR/deploy/k8s/overlays/$o" > "/tmp/render-$o.yaml"
             v="$(grep -A1 'name: MEMQL_IDENTITY_ENABLED' "/tmp/render-$o.yaml" | grep -m1 'value:' | sed 's/.*value: *//; s/"//g')"
             [ "$v" = "true" ] || { echo "ERROR: $o renders MEMQL_IDENTITY_ENABLED=$v (want true)" >&2; exit 1; }
+          done
+
+      - name: product bff CORS origin is concrete, never wildcard (#16)
+        # SERVER_ALLOWED_ORIGINS must never render "*" on the credentialed product
+        # bff (it carries user bearer tokens). Base renders the LOCAL front-door
+        # origin (https://app.<domain>); staging/prod OVERRIDE it to their public
+        # app host via identity-config.yaml. Assert EVERY overlay renders a
+        # concrete, non-empty, non-wildcard origin -- the CORS half of #16.
+        run: |
+          set -euo pipefail
+          for o in local staging prod; do
+            kubectl kustomize "$STAMP_DIR/deploy/k8s/overlays/$o" > "/tmp/cors-$o.yaml"
+            v="$(grep -A1 'name: SERVER_ALLOWED_ORIGINS' "/tmp/cors-$o.yaml" | grep -m1 'value:' | sed 's/.*value: *//; s/"//g')"
+            case "$v" in
+              ""|"*") echo "ERROR: $o renders SERVER_ALLOWED_ORIGINS='$v' (want a concrete non-wildcard origin)" >&2; exit 1 ;;
+            esac
+            echo "$o: SERVER_ALLOWED_ORIGINS=$v"
           done
 
       - name: client npm install + typecheck + build + lint (stamped, self-contained)
