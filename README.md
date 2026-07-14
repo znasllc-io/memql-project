@@ -12,6 +12,11 @@ product repo. The engine and cockpit are cloned as **siblings in the parent
 directory** (the workspace); the composition at deploy time is **two ArgoCD
 Applications** (engine + product), never a cross-repo kustomize base.
 
+When a product genuinely needs one-of-a-kind Go that pure DSL and engine-generic
+capabilities cannot express, the thin optional `bff/` escape hatch
+(`init.sh --go-module`) is designed in
+[docs/design/bff-payload.md](docs/design/bff-payload.md) -- exhaust DSL first.
+
 ```
 <workspace>/                    the parent directory (created by init.sh clones)
 ├── <product>/                  THIS repo, stamped -- the whole product
