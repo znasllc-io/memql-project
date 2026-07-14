@@ -18,13 +18,24 @@
 -include product.env
 
 ENGINE       ?= ../memql
+# One shared local k3d cluster (the engine creates it, the product joins it).
+# Overridable, but it is threaded through EVERY placement step below -- the
+# engine bring-up, the bundle import, the SPA build/import, and the product App
+# registration -- so `make up CLUSTER=x` builds ONE coherent stack on cluster x
+# instead of silently splitting it across two (C5).
 CLUSTER      ?= memql
 NAMESPACE    ?= memql
 # k3d LB ports fixed at cluster-create time; 50051 = the product bff raw gRPC.
 EXTRA_PORTS  ?= 50051:50051
 BUNDLE_IMAGE ?= $(PRODUCT)-dsl-bundle:local
 REVISION      = $(shell git rev-parse --abbrev-ref HEAD)
-REPO_URL      = https://github.com/$(PRODUCT_ORG)/$(PRODUCT).git
+# ArgoCD repo URL. The Application tracks THIS repo by URL, so derive it from the
+# actual `origin` remote rather than assuming the GitHub repo is named exactly
+# <product> (it need not be). Fall back to the org/product convention only when
+# there is no origin yet, and warn at `up` time so a wrong-name pin is visible
+# instead of silently pointing ArgoCD at a repo that does not exist (C12).
+ORIGIN_URL   := $(shell git remote get-url origin 2>/dev/null)
+REPO_URL     ?= $(if $(ORIGIN_URL),$(ORIGIN_URL),https://github.com/$(PRODUCT_ORG)/$(PRODUCT).git)
 IMPORT        = bash $(ENGINE)/scripts/k3d/import-image.sh
 
 .DEFAULT_GOAL := help
@@ -47,16 +58,18 @@ require-env:
 .PHONY: up
 ## Bring up the whole local stack: engine mesh + this product (bff + SPA + DSL).
 up: require-env
+	@test -n "$(ORIGIN_URL)" || echo "WARN: no 'origin' remote; ArgoCD repo-url falls back to $(REPO_URL) -- push this repo and confirm the URL matches, or ArgoCD will track a repo that may not exist (C12)."
 	@echo "==> [1/4] engine bring-up (cluster + ArgoCD + secrets + engine Application)"
-	$(MAKE) -C $(ENGINE) up EXTRA_PORTS=$(EXTRA_PORTS)
+	$(MAKE) -C $(ENGINE) up EXTRA_PORTS=$(EXTRA_PORTS) CLUSTER=$(CLUSTER)
 	@echo "==> [2/4] build + import the product DSL bundle image"
 	docker build -f deploy/Dockerfile.bundle -t $(BUNDLE_IMAGE) .
-	$(IMPORT) --image=$(BUNDLE_IMAGE) --dryRun=false
+	$(IMPORT) --image=$(BUNDLE_IMAGE) --cluster=$(CLUSTER) --dryRun=false
 	@echo "==> [3/4] build + import the product SPA image"
-	$(MAKE) -C client image
+	$(MAKE) -C client image CLUSTER=$(CLUSTER)
 	@echo "==> [4/4] register the product ArgoCD Application ($(PRODUCT)-local)"
 	MEMQL_K3D_REPO_TOKEN=$${MEMQL_K3D_REPO_TOKEN:-$$(gh auth token 2>/dev/null)} \
 	bash $(ENGINE)/scripts/k3d/up.sh \
+		--cluster=$(CLUSTER) \
 		--app-name=$(PRODUCT)-local \
 		--app-project=$(PRODUCT) \
 		--project-manifest=$(CURDIR)/deploy/argocd/project.yaml \
@@ -70,19 +83,19 @@ up: require-env
 ## Rebuild the DSL bundle and re-mount it on the product's bff (no cluster rebuild).
 dev: require-env
 	docker build -f deploy/Dockerfile.bundle -t $(BUNDLE_IMAGE) .
-	$(IMPORT) --image=$(BUNDLE_IMAGE) --dryRun=false
+	$(IMPORT) --image=$(BUNDLE_IMAGE) --cluster=$(CLUSTER) --dryRun=false
 	kubectl rollout restart -n $(NAMESPACE) deploy -l memql/product-dsl=true
 	kubectl rollout status  -n $(NAMESPACE) deploy -l memql/product-dsl=true --timeout=180s
 
 .PHONY: status
 ## Report the product Application + mesh status (delegates to the engine).
 status: require-env
-	$(MAKE) -C $(ENGINE) status APP_NAME=$(PRODUCT)-local
+	$(MAKE) -C $(ENGINE) status APP_NAME=$(PRODUCT)-local CLUSTER=$(CLUSTER)
 
 .PHONY: down
 ## Tear down the whole local cluster (engine + product share it).
 down:
-	$(MAKE) -C $(ENGINE) down
+	$(MAKE) -C $(ENGINE) down CLUSTER=$(CLUSTER)
 
 # -----------------------------------------------------------------------------
 # Build / validate (no cluster)
