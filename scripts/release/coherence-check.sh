@@ -45,10 +45,22 @@ DIGEST_RE='^sha256:[0-9a-f]{64}$'
 function check_overlay() {
     local env="$1" lf="$2"
     local dir="$REPO_ROOT/deploy/k8s/overlays/$env" rendered rc=0
-    if [ ! -d "$dir" ]; then cap_error "COHERENCE-FAIL: overlay dir not found: $dir"; return 1; fi
-    if ! rendered="$(kubectl kustomize "$dir" 2>/dev/null)"; then
-        cap_error "COHERENCE-FAIL: kustomize render failed: $dir"; return 1
+    # kubectl is a PREREQUISITE, not a coherence failure: its absence is exit 4
+    # (precondition), never exit 5 (op failed). Guard before rendering so a
+    # missing tool is reported honestly instead of masquerading as a render fail.
+    if ! command -v kubectl >/dev/null 2>&1; then
+        cap_fail 4 "kubectl not found -- required to render + check overlay '$env'"
     fi
+    if [ ! -d "$dir" ]; then cap_error "COHERENCE-FAIL: overlay dir not found: $dir"; return 1; fi
+    # Surface kustomize's own error (do not swallow stderr): a genuine render
+    # failure is exit 5, and its diagnostic is what an operator needs.
+    local render_err; render_err="$(mktemp)"
+    if ! rendered="$(kubectl kustomize "$dir" 2>"$render_err")"; then
+        cap_error "COHERENCE-FAIL: kustomize render failed: $dir"
+        [ -s "$render_err" ] && cap_error "$(cat "$render_err")"
+        rm -f "$render_err"; return 1
+    fi
+    rm -f "$render_err"
     local comp want got
     for comp in dsl-bundle client; do
         want="$(lock_comp "$lf" "$comp" digest)"

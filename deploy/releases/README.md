@@ -42,3 +42,33 @@ components:
 
 The scripts are registry-agnostic and read product identity from `product.env`,
 so this flow is byte-identical across every product stamped from the template.
+
+## SPA build-time configuration caveat (exact-bytes scope)
+
+The exact-bytes promise ("prod runs the same bytes staging ran") holds
+**unconditionally for the DSL bundle** -- it is data-only and carries no
+per-environment configuration.
+
+The **client SPA is different**: `client/Dockerfile` bakes two URLs at build
+time -- `VITE_MEMQL_HTTP_URL` (the bff front door) and `VITE_IDENTITY_BASE_URL`
+(the magic-link + JWKS host). `publish-images.yml` exposes them as the optional
+`vite_memql_http_url` / `vite_identity_base_url` dispatch inputs:
+
+- **Left blank (the starter default):** the Dockerfile defaults hold, the SPA
+  is environment-agnostic, and one client digest promotes staging -> prod
+  exactly, same as the bundle.
+- **Set to real per-environment URLs:** the client digest is **environment
+  specific**. Promoting the same client digest from staging to prod would ship
+  a SPA that talks to the staging backend from prod. In that case do **not**
+  promote the client digest across environments that use different URLs: build
+  the client once per environment (dispatch `publish-images.yml` with that
+  env's URLs) and pin each overlay to its own client digest. A single release
+  lockfile carries ONE client digest, so genuinely distinct per-env SPA URLs do
+  not fit the one-lockfile-per-release model as-is.
+
+The real fix that restores the unconditional exact-bytes promise for the client
+is **runtime SPA configuration** (serve the URLs from the environment at
+container start instead of baking them at build time), tracked as follow-up.
+Until then, keeping the two URLs environment-agnostic -- or serving both
+environments from the same public hostnames -- is what keeps a single client
+digest correct across a promote.

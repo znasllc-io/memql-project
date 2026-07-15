@@ -26,6 +26,7 @@ cap_spec_param "client-digest" "sha256:<64hex> digest of the client SPA image (r
 cap_spec_param "engine-ref"    "engine ref this release ships against (default: ENGINE_REF from product.env)"
 cap_spec_param "registry"      "registry host/path (default: REGISTRY from product.env)"
 cap_spec_param "out"           "output path (default: deploy/releases/<release>.yaml)"
+cap_spec_param "force"         "overwrite an existing lockfile whose content differs (immutability override; flag)"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
@@ -57,8 +58,14 @@ function main() {
     valid_digest "$client" || cap_fail 2 "--client-digest is not a sha256:<64hex> pin: $client"
 
     out="$(cap_param out "$REPO_ROOT/deploy/releases/$release.yaml")"
+    local force; force="$(cap_flag force)"
     mkdir -p "$(dirname "$out")"
 
+    # Render into a tmp first so we can honor the IMMUTABILITY invariant: a
+    # lockfile is never silently overwritten. Existing-and-identical is an
+    # idempotent no-op (changed=false); existing-and-different is REFUSED
+    # (exit 3) unless --force is passed. Only then does the file get written.
+    local tmp; tmp="$(mktemp)"
     {
         printf '# %s release lockfile -- assembled by scripts/release/assemble-lockfile.sh.\n' "$PRODUCT"
         printf '# Immutable: a new release gets a new file; never edit in place.\n'
@@ -72,8 +79,25 @@ function main() {
         printf '  client:\n'
         printf '    image: "%s/%s-client"\n' "$registry" "$PRODUCT"
         printf '    digest: "%s"\n' "$client"
-    } > "$out"
-    cap_step "wrote $out"
+    } > "$tmp"
+
+    if [ -f "$out" ]; then
+        if cmp -s "$tmp" "$out"; then
+            rm -f "$tmp"
+            cap_step "lockfile already up to date (unchanged): $out"
+        elif [ -n "$force" ]; then
+            mv "$tmp" "$out"
+            cap_changed
+            cap_step "overwrote existing lockfile (--force): $out"
+        else
+            rm -f "$tmp"
+            cap_fail 3 "release lockfile already exists with different content: $out -- lockfiles are immutable; use a new release id, or pass --force to overwrite"
+        fi
+    else
+        mv "$tmp" "$out"
+        cap_changed
+        cap_step "wrote $out"
+    fi
 
     # Self-validate: the assembled lockfile must pass the coherence gate.
     if ! bash "$(dirname "${BASH_SOURCE[0]}")/coherence-check.sh" --lockfile="$out" >/dev/null; then
@@ -84,7 +108,8 @@ function main() {
     cap_result_set    lockfile "$out"
     cap_result_set    bundleDigest "$bundle"
     cap_result_set    clientDigest "$client"
-    cap_changed
+    # changed is set per-branch above (write/overwrite -> true; no-op -> false),
+    # honoring the idempotency signal rather than always claiming a mutation.
     cap_ok
 }
 main "$@"
