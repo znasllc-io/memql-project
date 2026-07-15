@@ -20,6 +20,19 @@ permissions:
 # are NOT required checks; the required gate is ci.yml's `ci-required` + the
 # gitleaks `scan`.
 jobs:
+  make-parse-smoke:
+    # #34: the template Makefile is parsed by no other lane, so a delimiter
+    # regression only surfaced downstream in stamped products. make -n forces
+    # a full parse without executing recipes; -include product.env keeps the
+    # unstamped root parseable.
+    name: make-parse-smoke
+    if: github.repository == 'znasllc-io/memql-project'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: template Makefile parses
+        run: make -n help > /dev/null
+
   init-smoke:
     name: init-smoke (${{ matrix.product }})
     if: github.repository == 'znasllc-io/memql-project'
@@ -111,6 +124,14 @@ jobs:
           test -f product.env && grep -qx "PRODUCT=$PRODUCT" product.env
           test ! -e product.env.example
           test ! -e .github/workflows/template-ci.yml   # pruned in the stamped copy
+
+      - name: Makefile parse smoke (stamped) (#34)
+        # A delimiter/parse regression on the Makefile is invisible without
+        # running make: -n forces a full parse (missing-separator class fails
+        # on any target) without executing recipes.
+        run: |
+          cd "$STAMP_DIR"
+          make -n help > /dev/null
 
       - name: kustomize renders every overlay (stamped)
         run: |
