@@ -36,6 +36,14 @@ on:
         required: false
         type: boolean
         default: true
+      vite_memql_http_url:
+        description: "SPA build arg VITE_MEMQL_HTTP_URL -- the bff front door the browser talks to. Leave blank to keep the Dockerfile default (starter/sim). See the SPA build-time caveat in deploy/releases/README.md."
+        required: false
+        type: string
+      vite_identity_base_url:
+        description: "SPA build arg VITE_IDENTITY_BASE_URL -- the magic-link + JWKS host. Leave blank to keep the Dockerfile default. Baking these makes the client digest env-specific (see caveat)."
+        required: false
+        type: string
 
 concurrency:
   # Serialize per ref so two dispatches on the same branch never race the same
@@ -98,6 +106,13 @@ jobs:
           # The starter is self-contained (public deps only), so this is unused
           # today; the Dockerfile marks the BuildKit secret required=false.
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # SPA build-time envelope (client/Dockerfile's two documented VITE_ ARGs).
+          # Empty -> the Dockerfile default (starter/sim single-DOMAIN fallback).
+          # NON-empty -> a correctly-configured but ENV-SPECIFIC client digest;
+          # see the SPA build-time caveat in deploy/releases/README.md before
+          # relying on the exact-bytes staging->prod promote for the client image.
+          VITE_MEMQL_HTTP_URL: ${{ inputs.vite_memql_http_url }}
+          VITE_IDENTITY_BASE_URL: ${{ inputs.vite_identity_base_url }}
         run: |
           set -euo pipefail
           export DOCKER_BUILDKIT=1
@@ -109,12 +124,19 @@ jobs:
               | sed -n "s#^${ref}@##p" | head -1
           }
 
+          # ARCH CONTRACT: the cluster runs linux/amd64, so every published image
+          # is pinned to that platform. Without this, `docker build` implicitly
+          # targets the runner's arch -- a runner arch change (or an arm64 runner)
+          # would publish a digest that pins cleanly but exec-format-errors on the
+          # node. Pinning keeps the pushed digest's arch honest regardless of runner.
+          PLATFORM="linux/amd64"
+
           # build_one <output-key> <image-suffix> <dockerfile> <context> [extra docker build args...]
           build_one() {
             local key="$1" suffix="$2" dockerfile="$3" context="$4"; shift 4
             local ref="$REGISTRY/$PRODUCT-$suffix"
-            echo "==> build $ref:$TAG (-f $dockerfile $context)" >&2
-            docker build -f "$dockerfile" -t "$ref:$TAG" "$@" "$context" >&2
+            echo "==> build $ref:$TAG (--platform $PLATFORM -f $dockerfile $context)" >&2
+            docker build --platform="$PLATFORM" -f "$dockerfile" -t "$ref:$TAG" "$@" "$context" >&2
             printf '%s_image=%s\n' "$key" "$ref" >> "$GITHUB_OUTPUT"
             if [ "$PUSH" != "true" ]; then
               echo "build-only (push disabled): skipping push + digest for $suffix" >&2
@@ -133,10 +155,15 @@ jobs:
           build_one bundle dsl-bundle deploy/Dockerfile.bundle .
 
           # The SPA: BuildKit secret carries NODE_AUTH_TOKEN (optional), context
-          # is client/. The client build args keep their Dockerfile defaults
-          # (the starter SPA runs on sim data until the live memql seam is wired).
+          # is client/. The two documented VITE_ build args are fed from the
+          # dispatch inputs; when both are blank the Dockerfile defaults hold (the
+          # starter SPA runs on sim data until the live memql seam is wired), so
+          # this is a no-op for the starter. Passing empty --build-arg values is
+          # safe: the ARGs default to empty in client/Dockerfile.
           build_one client client client/Dockerfile client \
-            --secret id=node_auth_token,env=NODE_AUTH_TOKEN
+            --secret id=node_auth_token,env=NODE_AUTH_TOKEN \
+            --build-arg VITE_MEMQL_HTTP_URL="$VITE_MEMQL_HTTP_URL" \
+            --build-arg VITE_IDENTITY_BASE_URL="$VITE_IDENTITY_BASE_URL"
 
       - name: emit release lockfile + digest summary
         if: ${{ inputs.push }}
@@ -151,9 +178,16 @@ jobs:
         run: |
           set -euo pipefail
           # ENGINE_REF for the lockfile's builtAgainstEngine coherence field.
+          # Read it in a SUBSHELL: a plain `. ./product.env` here re-sets REGISTRY
+          # and PRODUCT to product.env's own values, clobbering the RESOLVED ones
+          # this step already received from steps.cfg (which honor the dispatch
+          # 'registry' input and may differ from -- or be empty in -- product.env).
+          # The subshell reads ENGINE_REF without leaking product.env into the step.
           engine_ref=""
-          # shellcheck disable=SC1091
-          [ -f product.env ] && . ./product.env && engine_ref="${ENGINE_REF:-}"
+          if [ -f product.env ]; then
+            # shellcheck disable=SC1091
+            engine_ref="$(. ./product.env && printf '%s' "${ENGINE_REF:-}")"
+          fi
 
           {
             echo "## publish-images: $PRODUCT @ $TAG"

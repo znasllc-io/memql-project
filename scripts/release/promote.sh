@@ -82,7 +82,13 @@ function main() {
     local bundle_new="$registry/${PRODUCT}-dsl-bundle" client_new="$registry/${PRODUCT}-client"
 
     local tmp; tmp="$(mktemp)"
-    awk -v bn="$bundle_name" -v cn="$client_name" \
+    # Rewrite into $tmp and count each substitution. awk prints the rewritten
+    # overlay to stdout ($tmp) and a "bnew=.. bdig=.. cnew=.. cdig=.." tally to
+    # stderr (captured below). If a product image `- name:` block drifted so a
+    # substitution never fired, the tally exposes it BEFORE we overwrite the
+    # overlay -- a structurally-off overlay is never left half-rewritten on disk.
+    local counts
+    counts="$(awk -v bn="$bundle_name" -v cn="$client_name" \
         -v bnew="$bundle_new" -v bdig="$bundle_digest" \
         -v cnew="$client_new" -v cdig="$client_digest" '
         /^  - name: / {
@@ -90,13 +96,23 @@ function main() {
             if (cur==bn) which="b"; else if (cur==cn) which="c"; else which=""
         }
         {
-            if (which=="b" && $1=="newName:") { print "    newName: " bnew; next }
-            if (which=="b" && $1=="digest:")  { print "    digest: " bdig;  next }
-            if (which=="c" && $1=="newName:") { print "    newName: " cnew; next }
-            if (which=="c" && $1=="digest:")  { print "    digest: " cdig;  next }
+            if (which=="b" && $1=="newName:") { print "    newName: " bnew; bnew_n++; next }
+            if (which=="b" && $1=="digest:")  { print "    digest: " bdig;  bdig_n++; next }
+            if (which=="c" && $1=="newName:") { print "    newName: " cnew; cnew_n++; next }
+            if (which=="c" && $1=="digest:")  { print "    digest: " cdig;  cdig_n++; next }
             print
         }
-    ' "$overlay" > "$tmp"
+        END {
+            printf "bnew=%d bdig=%d cnew=%d cdig=%d\n", \
+                bnew_n+0, bdig_n+0, cnew_n+0, cdig_n+0 > "/dev/stderr"
+        }
+    ' "$overlay" 2>&1 >"$tmp")"
+
+    # Both product images must have had exactly one newName + one digest rewritten.
+    if [ "$counts" != "bnew=1 bdig=1 cnew=1 cdig=1" ]; then
+        rm -f "$tmp"
+        cap_fail 5 "overlay $env not rewritten as expected ($counts) -- product image name blocks ('$bundle_name' / '$client_name') may have drifted; overlay left untouched: $overlay"
+    fi
 
     if [ -n "$dry" ]; then
         cap_step "dry-run: $overlay would be rewritten to:"
