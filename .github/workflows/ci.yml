@@ -219,13 +219,15 @@ jobs:
         with:
           go-version: '1.26.4'
           cache: false
-      # Best-available no-Go-repo validation: the engine's own load pipeline via
-      # `go run ./cmd/memqllint` against a sibling engine clone. HONEST SCOPE: it
-      # is PARSE-ONLY for the Form B `use` imports the starter uses (the import
-      # graph is not deeply resolved for that form) -- it does NOT resolve
-      # executor names or validate builtin/tool bodies; a live boot does. The
-      # engine gap (deeper standalone validation for a no-Go repo) is tracked in
-      # znasllc-io/memql#2509.
+      # No-Go-repo validation via the engine's own load pipeline: `go run
+      # ./cmd/memqllint` against a sibling engine clone. Lints the DSL ROOT
+      # (dsl/), NOT each namespace dir -- the engine-parity tier (memql#2520,
+      # runs the real MemQLEngine.Init boot validators as an overlay) mounts a
+      # ROOT OF DOMAINS; handed a single namespace dir it finds no domains and
+      # passes trivially. Linting per-domain silently opted every product out of
+      # that tier (memql-project#36), which is how a declared-but-unused arg, a
+      # non-canonical @relationship, or a CQS violation reached boot with a
+      # green gate. The root form catches them here.
       #
       # Engine ref: the pinned ENGINE_REF from product.env (a stamped instance),
       # else -- the unstamped in-template path -- the SAME default init.sh pins:
@@ -250,17 +252,22 @@ jobs:
           echo "engine ref: $ref"
           git clone --depth 1 --branch "$ref" https://github.com/znasllc-io/memql.git /tmp/memql \
             || { echo "ERROR: failed to clone engine at ref '$ref'" >&2; exit 1; }
-      - name: memqllint every product DSL domain
+      - name: memqllint the product DSL root (engine-parity tier)
         run: |
           set -euo pipefail
-          mapfile -t dsl_dirs < <(find "$PWD/dsl" -mindepth 1 -maxdepth 1 -type d | sort)
-          [ "${#dsl_dirs[@]}" -gt 0 ] || { echo "no dsl/<domain> dir found" >&2; exit 1; }
-          echo "linting ${#dsl_dirs[@]} domain(s): ${dsl_dirs[*]}"
+          dsl_root="$PWD/dsl"
+          # Capture the product path before cd'ing into the engine clone.
+          [ -d "$dsl_root" ] || { echo "no dsl/ root found" >&2; exit 1; }
+          # At least one domain must exist under dsl/, else the parity overlay
+          # mounts nothing and passes trivially -- the exact vacuous-gate this
+          # lane is meant to prevent.
+          if [ -z "$(find "$dsl_root" -mindepth 1 -maxdepth 1 -type d -print -quit)" ]; then
+            echo "no dsl/<domain> dir under $dsl_root" >&2
+            exit 1
+          fi
+          echo "linting DSL root: $dsl_root"
           cd /tmp/memql
-          for d in "${dsl_dirs[@]}"; do
-            echo "==> memqllint $d"
-            go run ./cmd/memqllint "$d"
-          done
+          go run ./cmd/memqllint "$dsl_root"
 
   ci-required:
     name: ci-required
