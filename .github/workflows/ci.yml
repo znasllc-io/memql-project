@@ -225,9 +225,9 @@ jobs:
       # runs the real MemQLEngine.Init boot validators as an overlay) mounts a
       # ROOT OF DOMAINS; handed a single namespace dir it finds no domains and
       # passes trivially. Linting per-domain silently opted every product out of
-      # that tier (memql-project#36 / fylo#68), which is how a declared-but-
-      # unused arg, a non-canonical @relationship, or a CQS violation reached
-      # boot with a green gate. The root form catches them here.
+      # that tier (memql-project#36), which is how a declared-but-unused arg, a
+      # non-canonical @relationship, or a CQS violation reached boot with a
+      # green gate. The root form catches them here.
       #
       # Engine ref: the pinned ENGINE_REF from product.env (a stamped instance),
       # else -- the unstamped in-template path -- the SAME default init.sh pins:
