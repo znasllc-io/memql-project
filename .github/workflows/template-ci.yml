@@ -133,6 +133,30 @@ jobs:
           cd "$STAMP_DIR"
           make -n help > /dev/null
 
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.26.4'
+          cache: false
+      - name: memqllint the stamped DSL root (engine-parity tier) (#36)
+        # ci.yml's dsl: lane lints the DSL ROOT so the engine-parity tier
+        # (memql#2520) runs. On the UNSTAMPED template that root holds only the
+        # __PRODUCT__ placeholder, which is not a valid domain at that tier, so
+        # the real parity check lives HERE, on a properly stamped demo -- it
+        # catches what per-domain linting missed (declared-but-unused args,
+        # non-canonical @relationship types, CQS violations). Mirrors ci.yml:
+        # clone the engine at the stamped product.env ref, then lint dsl/ (the
+        # root of domains), never a single namespace dir.
+        run: |
+          set -euo pipefail
+          cd "$STAMP_DIR"
+          # shellcheck disable=SC1091
+          . ./product.env
+          ref="${ENGINE_REF:?stamped product.env must pin ENGINE_REF}"
+          echo "engine ref: $ref"
+          git clone --depth 1 --branch "$ref" https://github.com/znasllc-io/memql.git /tmp/memql-lint \
+            || { echo "ERROR: failed to clone engine at ref '$ref'" >&2; exit 1; }
+          ( cd /tmp/memql-lint && go run ./cmd/memqllint "$STAMP_DIR/dsl" )
+
       - name: kustomize renders every overlay (stamped)
         run: |
           for o in local staging prod; do
