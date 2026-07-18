@@ -116,7 +116,7 @@ The bff image keeps mounting the same DSL bundle it does today; the Go module
 adds only the executor implementation the bundle's `@executor` builtins name.
 
 > **Do NOT lift the archived `main.go` verbatim.** The engine's `main.go` has
-> drifted since `archive/carrier-payload` was cut: it gained subcommand dispatch
+> drifted since commit `bdd8d67` (the archived carrier tree) was cut: it gained subcommand dispatch
 > (`dispatchSubcommand`) and graceful-shutdown `RunConfig` fields (`BeginDrain`,
 > `DrainDelay`, `GracePeriod`, `ActiveWork`) that the archived carrier `main.go`
 > lacks. Re-mirror the **current** engine `main.go`, not the archive. (This is
@@ -440,12 +440,18 @@ per product only when the plugin needs Postgres. If it is added to the template
 
 ---
 
-## 6. Salvage map -- `archive/carrier-payload`
+## 6. Salvage map -- commit `bdd8d67`
+
+The archived carrier tree lives at commit `bdd8d67` (the merge of #7, "DSL-first
+product template as the default stamp") -- the last commit that carried
+`templates/carrier/` before main dropped it. It is an ancestor of `main`, so it
+is permanently reachable: `git show bdd8d67:templates/carrier/<path>` or
+`git checkout bdd8d67`. (It was formerly also tagged by the branch
+`archive/carrier-payload`, now removed as a redundant pointer.)
 
 Exact paths worth lifting when implementing, and what stays dead. All paths are
-under `templates/carrier/` on branch `archive/carrier-payload` unless noted;
-`<product>` stands for the product-slug token the archive carries in those path
-names.
+under `templates/carrier/` at commit `bdd8d67` unless noted; `<product>` stands
+for the product-slug token the archive carries in those path names.
 
 ### 6.1 Lift (adapt to the current contract)
 
