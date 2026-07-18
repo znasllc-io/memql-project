@@ -24,7 +24,7 @@
 use __PRODUCT__.logic.{ onGreetingCreated }
 
 @enabled
-@trigger(event="node.created", concept="v1:__PRODUCT__:greeting", partition="*")
+@trigger(event="node.created", concept="v1:__PRODUCT_ID__:greeting", partition="*")
 @description("On creation of a greeting, run the pure-DSL onGreetingCreated logic. Demonstrates a pack automation firing on a graph event with zero product Go.")
 automation greetOnGreetingCreate {
   step react {

@@ -64,7 +64,7 @@ jobs:
           # CAP_STAMP_PATHS, so a product repo's own non-template content must
           # survive the stamp byte-for-byte. Asserted below.
           mkdir -p product-content
-          printf '__PRODUCT_ID__ __PRODUCT__ __PRODUCT_ORG__ __DOMAIN__ __ENGINE_REF__ __REGISTRY__\n' \
+          printf '__PRODUCT_ID__ __PRODUCT_CAMEL__ __PRODUCT__ __PRODUCT_ORG__ __DOMAIN__ __ENGINE_REF__ __REGISTRY__\n' \
             > product-content/notes.md
           scripts/init.sh --product="$PRODUCT" --product-org=demo-org --domain=demo.local --skip-clones \
             | tee /tmp/init.json
@@ -79,7 +79,7 @@ jobs:
         run: |
           set -euo pipefail
           cd "$STAMP_DIR"
-          expected='__PRODUCT_ID__ __PRODUCT__ __PRODUCT_ORG__ __DOMAIN__ __ENGINE_REF__ __REGISTRY__'
+          expected='__PRODUCT_ID__ __PRODUCT_CAMEL__ __PRODUCT__ __PRODUCT_ORG__ __DOMAIN__ __ENGINE_REF__ __REGISTRY__'
           got="$(cat product-content/notes.md)"
           [ "$got" = "$expected" ] || { echo "ERROR: substitute_tree rewrote non-template content: '$got'" >&2; exit 1; }
           rm -rf product-content
@@ -94,7 +94,7 @@ jobs:
         run: |
           cd "$STAMP_DIR"
           if grep -rn --exclude-dir=node_modules \
-              '__PRODUCT_ID__\|__PRODUCT__\|__PRODUCT_ORG__\|__DOMAIN__\|__ENGINE_REF__\|__ENGINE_VERSION__\|__REGISTRY__' . \
+              '__PRODUCT_ID__\|__PRODUCT_CAMEL__\|__PRODUCT__\|__PRODUCT_ORG__\|__DOMAIN__\|__ENGINE_REF__\|__ENGINE_VERSION__\|__REGISTRY__' . \
               | grep -vE '^\./scripts/'; then
             echo "ERROR: unsubstituted template token in the stamped product" >&2
             exit 1
@@ -134,7 +134,6 @@ jobs:
           make -n help > /dev/null
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
-        if: matrix.product == 'demo'
         with:
           go-version: '1.26.4'
           cache: false
@@ -148,12 +147,9 @@ jobs:
         # clone the engine at the stamped product.env ref, then lint dsl/ (the
         # root of domains), never a single namespace dir.
         #
-        # Gated to the non-hyphenated `demo` for now: this parity tier caught a
-        # pre-existing bug where the starter DSL stamps invalid identifiers
-        # (hyphenated namespace + non-camelCase tool names) for the `demo-app`
-        # case -- tracked in memql-project#38. Re-enable for the full matrix
-        # (drop this `if`) once #38 lands.
-        if: matrix.product == 'demo'
+        # Runs on the FULL matrix (demo AND demo-app): #38 fixed the identifier
+        # stamping this tier caught, so the hyphenated `demo-app` case now passes
+        # -- the matrix is exactly what guards that fix from regressing.
         run: |
           set -euo pipefail
           cd "$STAMP_DIR"
