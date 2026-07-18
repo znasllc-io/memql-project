@@ -257,15 +257,24 @@ function resolve_engine_ref() {
 
 # PRODUCT_ID -- an identifier-safe form of the product name (hyphens -> under-
 # scores) for positions that must be a valid JS/TS/Go identifier, e.g. the
-# generated concepts.ts object KEYS (demo-app_GREETING is a syntax error; the
-# `v1:demo-app:greeting` string VALUE is fine and keeps __PRODUCT__). Non-
-# hyphenated names are unchanged, so this is a no-op for the common case (B5).
+# generated concepts.ts object KEYS (demo-app_GREETING is a syntax error) AND
+# the canonical `v1:` concept-id namespace segment: the engine's @namespace
+# pattern is [a-z][a-z0-9_]* (no hyphens), so a `v1:demo-app:greeting` id is
+# REJECTED at registration -- the id must be `v1:demo_app:greeting` (#38).
+# Non-hyphenated names are unchanged, so this is a no-op for the common case.
 PRODUCT_ID=""   # set in main() once PRODUCT is known
+
+# PRODUCT_CAMEL -- a lowerCamelCase form of the product name (demo-app ->
+# demoApp) for positions that must be camelCase (letters/digits, starting
+# lowercase), where NEITHER the raw name (hyphen) nor PRODUCT_ID (underscore)
+# is legal: memQL tool names (#38). No-op for a single-word name.
+PRODUCT_CAMEL=""   # set in main() once PRODUCT is known
 
 # substitute_tokens_in_string <string> -- for path renames.
 function substitute_tokens_in_string() {
     local s="$1"
     s="${s//__PRODUCT_ID__/$PRODUCT_ID}"
+    s="${s//__PRODUCT_CAMEL__/$PRODUCT_CAMEL}"
     s="${s//__PRODUCT_ORG__/$PRODUCT_ORG}"
     s="${s//__PRODUCT__/$PRODUCT}"
     s="${s//__DOMAIN__/$DOMAIN}"
@@ -275,14 +284,15 @@ function substitute_tokens_in_string() {
 }
 
 # sed_token_program -- the shared sed expression list (used for file contents).
-# __PRODUCT_ID__ is substituted first (longest, non-overlapping with __PRODUCT__).
-# __REGISTRY__ uses REGISTRY_MANIFEST, which is the real registry when set and a
-# fail-closed placeholder (registry.example.com) when local-only, so the
-# staging/prod overlays always render a VALID image ref (no leading-slash name)
-# even though product.env REGISTRY stays empty for a local-only product.
+# __PRODUCT_ID__ / __PRODUCT_CAMEL__ are substituted first (longer, non-
+# overlapping with __PRODUCT__). __REGISTRY__ uses REGISTRY_MANIFEST, which is
+# the real registry when set and a fail-closed placeholder (registry.example.com)
+# when local-only, so the staging/prod overlays always render a VALID image ref
+# (no leading-slash name) even though product.env REGISTRY stays empty for a
+# local-only product.
 function sed_token_program() {
-    printf 's|__PRODUCT_ID__|%s|g; s|__PRODUCT_ORG__|%s|g; s|__PRODUCT__|%s|g; s|__DOMAIN__|%s|g; s|__ENGINE_REF__|%s|g; s|__REGISTRY__|%s|g' \
-        "$PRODUCT_ID" "$PRODUCT_ORG" "$PRODUCT" "$DOMAIN" "$RESOLVED_ENGINE_REF" "$REGISTRY_MANIFEST"
+    printf 's|__PRODUCT_ID__|%s|g; s|__PRODUCT_CAMEL__|%s|g; s|__PRODUCT_ORG__|%s|g; s|__PRODUCT__|%s|g; s|__DOMAIN__|%s|g; s|__ENGINE_REF__|%s|g; s|__REGISTRY__|%s|g' \
+        "$PRODUCT_ID" "$PRODUCT_CAMEL" "$PRODUCT_ORG" "$PRODUCT" "$DOMAIN" "$RESOLVED_ENGINE_REF" "$REGISTRY_MANIFEST"
 }
 
 # is_skipped <relpath> -- true if the path is an operational file/dir init must
@@ -363,7 +373,7 @@ function substitute_tree() {
     while IFS= read -r -d '' f; do
         rel="${f#"$ROOT"/}"
         is_skipped "$rel" && continue
-        grep -q '__PRODUCT_ID__\|__PRODUCT__\|__PRODUCT_ORG__\|__DOMAIN__\|__ENGINE_REF__\|__REGISTRY__' "$f" 2>/dev/null || continue
+        grep -q '__PRODUCT_ID__\|__PRODUCT_CAMEL__\|__PRODUCT__\|__PRODUCT_ORG__\|__DOMAIN__\|__ENGINE_REF__\|__REGISTRY__' "$f" 2>/dev/null || continue
         tmp="$(mktemp)"
         sed -e "$prog" "$f" > "$tmp"
         if cmp -s "$tmp" "$f"; then
@@ -534,6 +544,7 @@ function main() {
     reconcile_with_existing_env
     validate_substitution_values
     PRODUCT_ID="${PRODUCT//-/_}"     # identifier-safe form for JS/TS/Go id positions (B5)
+    PRODUCT_CAMEL="$(printf '%s' "$PRODUCT" | awk -F- '{out=$1; for(i=2;i<=NF;i++){out=out toupper(substr($i,1,1)) substr($i,2)} print out}')"  # lowerCamelCase for tool names (demo-app -> demoApp) (#38)
     RESOLVED_ENGINE_REF="$(resolve_engine_ref)"
     # Real registry when set; a fail-closed placeholder for local-only products
     # so staging/prod overlays still render a valid image ref (they also pin

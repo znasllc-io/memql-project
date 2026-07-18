@@ -11,8 +11,10 @@
 //
 // IDENTIFIER SAFETY: the object KEYS below use __PRODUCT_ID__ (the product name
 // with hyphens mapped to underscores) so a hyphenated product (e.g. demo-app)
-// stamps a valid TS identifier (demo_app_GREETING), while the canonical `v1:`
-// string VALUES keep __PRODUCT__ (a `v1:demo-app:greeting` namespace is fine).
+// stamps a valid TS identifier (demo_app_GREETING). The canonical `v1:` string
+// VALUES use __PRODUCT_ID__ too: the engine's @namespace pattern is
+// [a-z][a-z0-9_]* (no hyphens), so the concept registers as v1:demo_app:greeting
+// and these VALUES must match it exactly (#38).
 //
 // THIS IS THE ONE PLACE canonical `v1:` ids may appear -- they are the DSL
 // source of truth, machine-generated. Everywhere else in the app, refer to a
@@ -25,7 +27,7 @@ export const Concepts = {
   COGNITION_SPACE: "v1:cognition:space",
   COGNITION_PARTICIPANT: "v1:cognition:participant",
   IDENTITY_USER: "v1:identity:user",
-  __PRODUCT_ID___GREETING: "v1:__PRODUCT__:greeting",
+  __PRODUCT_ID___GREETING: "v1:__PRODUCT_ID__:greeting",
 } as const;
 export type ConceptKey = keyof typeof Concepts;
 export type ConceptId = (typeof Concepts)[ConceptKey];
@@ -41,9 +43,9 @@ export const CDCTopics = {
   COGNITION_SPACE_CREATED: "graph.node.created.v1:cognition:space",
   COGNITION_SPACE_UPDATED: "graph.node.updated.v1:cognition:space",
   COGNITION_SPACE_DELETED: "graph.node.deleted.v1:cognition:space",
-  __PRODUCT_ID___GREETING_CREATED: "graph.node.created.v1:__PRODUCT__:greeting",
-  __PRODUCT_ID___GREETING_UPDATED: "graph.node.updated.v1:__PRODUCT__:greeting",
-  __PRODUCT_ID___GREETING_DELETED: "graph.node.deleted.v1:__PRODUCT__:greeting",
+  __PRODUCT_ID___GREETING_CREATED: "graph.node.created.v1:__PRODUCT_ID__:greeting",
+  __PRODUCT_ID___GREETING_UPDATED: "graph.node.updated.v1:__PRODUCT_ID__:greeting",
+  __PRODUCT_ID___GREETING_DELETED: "graph.node.deleted.v1:__PRODUCT_ID__:greeting",
 } as const;
 
 /** Subscription filters: node.<action>.<concept> (the backend prepends `graph.`). */
@@ -51,9 +53,9 @@ export const CDCFilters = {
   COGNITION_SPACE_CREATED: "node.created.v1:cognition:space",
   COGNITION_SPACE_UPDATED: "node.updated.v1:cognition:space",
   COGNITION_SPACE_DELETED: "node.deleted.v1:cognition:space",
-  __PRODUCT_ID___GREETING_CREATED: "node.created.v1:__PRODUCT__:greeting",
-  __PRODUCT_ID___GREETING_UPDATED: "node.updated.v1:__PRODUCT__:greeting",
-  __PRODUCT_ID___GREETING_DELETED: "node.deleted.v1:__PRODUCT__:greeting",
+  __PRODUCT_ID___GREETING_CREATED: "node.created.v1:__PRODUCT_ID__:greeting",
+  __PRODUCT_ID___GREETING_UPDATED: "node.updated.v1:__PRODUCT_ID__:greeting",
+  __PRODUCT_ID___GREETING_DELETED: "node.deleted.v1:__PRODUCT_ID__:greeting",
 } as const;
 
 export type CDCAction = "created" | "updated" | "deleted";

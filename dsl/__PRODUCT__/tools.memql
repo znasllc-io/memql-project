@@ -14,14 +14,14 @@
 @handler(type="query", query="query myGreetings()")
 @executionTime("fast")
 @description("List the caller's greetings (id, message, createdAt). Read-only; owned -- only the caller's own greetings are returned.")
-tool __PRODUCT__ListGreetings {
+tool __PRODUCT_CAMEL__ListGreetings {
 }
 
 @enabled
 @handler(type="query", query="mutation createGreeting(greetingId: \"$args.greetingId\", message: \"$args.message\")")
 @executionTime("fast")
 @description("Create a greeting for the caller. Owned: ownership is server-stamped. Pass a fresh unique greetingId and the message text.")
-tool __PRODUCT__CreateGreeting {
+tool __PRODUCT_CAMEL__CreateGreeting {
   greetingId  string  @required  @description("Fresh unique id for the new greeting, e.g. a UUID.")
   message     string  @required  @description("The greeting text.")
 }
