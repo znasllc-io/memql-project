@@ -360,6 +360,33 @@ function rename_token_paths() {
     done
 }
 
+# write_namespace_pin -- pin the DELIBERATE namespace/directory divergence a
+# hyphenated product name creates. The DSL domain directory is dsl/<product>
+# (the slug, hyphens and all), but the engine's @namespace pattern is
+# [a-z][a-z0-9_]* -- no hyphens -- so the stamped concepts declare
+# @namespace("<product_id>") with underscores (#38). The engine's moved-file
+# guard (memql#2614) refuses any @namespace that neither equals its directory,
+# extends it as "<dir>:...", nor matches the domain's one-line namespace.pin --
+# so without this pin a hyphenated product's domain does not load at all.
+# A non-hyphenated product needs no pin (directory == namespace) and gets none.
+# The pin is a one-line file holding the namespace, and it ships inside the DSL
+# bundle image with the rest of dsl/, so the mounted domain carries it too.
+function write_namespace_pin() {
+    [[ "$PRODUCT_ID" == "$PRODUCT" ]] && return 0
+    [[ -d "$ROOT/dsl/$PRODUCT" ]] || return 0
+    local target="$ROOT/dsl/$PRODUCT/namespace.pin" tmp
+    tmp="$(mktemp)"
+    printf '%s\n' "$PRODUCT_ID" > "$tmp"
+    if [[ -f "$target" ]] && cmp -s "$tmp" "$target"; then
+        rm -f "$tmp"
+    else
+        mv "$tmp" "$target"
+        cap_step "wrote dsl/$PRODUCT/namespace.pin ($PRODUCT_ID)"
+        cap_changed
+    fi
+    return 0
+}
+
 # substitute_tree -- substitute tokens in the CONTENTS of every non-skipped file
 # that currently contains a token. Idempotent: a file with no tokens is a no-op.
 # SCOPE: walks ONLY the template-owned CAP_STAMP_PATHS, never the whole repo root,
@@ -502,6 +529,9 @@ function print_dry_run_plan() {
     cap_info "registry:     ${REGISTRY_VALUE:-<empty: local-only>}"
     cap_info "would write:  product.env"
     cap_info "would rename: dsl/__PRODUCT__/ -> dsl/$PRODUCT/, deploy/argocd/apps/__PRODUCT__-*.yaml"
+    if [[ "$PRODUCT_ID" != "$PRODUCT" ]]; then
+        cap_info "would pin:    dsl/$PRODUCT/namespace.pin -> $PRODUCT_ID (hyphenated name; memql#2614)"
+    fi
     cap_info "would stamp:  dsl/, deploy/, clients/ (every surface: src+manifests+docs), ONBOARDING.md, CLAUDE.md"
     cap_info "would prune:  .github/workflows/template-ci.yml, product.env.example; replace README.md with a product stub"
     if [[ -n "$SKIP_CLONES" ]]; then
@@ -570,6 +600,7 @@ function main() {
     write_product_env
     rename_token_paths
     substitute_tree
+    write_namespace_pin
     replace_readme
     prune_template_artifacts
     clone_siblings

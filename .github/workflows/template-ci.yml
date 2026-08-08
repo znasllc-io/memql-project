@@ -126,6 +126,16 @@ jobs:
           test -f clients/README.md
           test ! -e client
           test -f deploy/k8s/base/clients-web.yaml
+          # A hyphenated product name makes the DSL directory (demo-app) and the
+          # @namespace (demo_app) legitimately diverge, which the engine's
+          # moved-file guard requires be pinned (memql#2614). Assert the pin is
+          # stamped for that case and absent otherwise.
+          if case "$PRODUCT" in *-*) true ;; *) false ;; esac; then
+            test -f "dsl/$PRODUCT/namespace.pin"
+            grep -qx "${PRODUCT//-/_}" "dsl/$PRODUCT/namespace.pin"
+          else
+            test ! -e "dsl/$PRODUCT/namespace.pin"
+          fi
           test -f "deploy/argocd/apps/$PRODUCT-staging.yaml"
           test -f "deploy/argocd/apps/$PRODUCT-prod.yaml"
           test -f product.env && grep -qx "PRODUCT=$PRODUCT" product.env
