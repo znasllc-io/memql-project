@@ -4,12 +4,16 @@
 // zero product Go, no integration executor. createGreeting stamps ownerUserId
 // from actor.userId server-side (a caller can only ever create their own
 // greeting) and takes the message text; the caller mints a fresh greetingId.
+// Reading the auth envelope is a DECLARED capability: because the insert stamps
+// actor.userId, the mutation carries a bare `@actor` annotation (engine
+// memql#2621); the loader rejects an undeclared actor read.
 // Grow this file with the product's own mutations.
 
 use __PRODUCT__.concepts.{ greeting }
 
 @enabled
 @description("Create a greeting for the caller. Owned: ownerUserId is stamped from actor.userId, so a caller can only ever create their own greeting. message is required; the caller mints a fresh greetingId.")
+@actor
 mutate greeting createGreeting {
   args {
     greetingId  string  @required
