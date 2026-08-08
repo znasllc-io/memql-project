@@ -4,13 +4,25 @@ GitHub **template for a memQL product**: one repo that becomes a whole product
 running on the shared, product-agnostic
 [memQL engine](https://github.com/znasllc-io/memql).
 
-A product is a **DSL bundle + a client** -- **no product Go and no per-product
-node images** in the common case (platform consolidation,
+A product is a **DSL bundle plus one or more client surfaces** -- **no product
+Go and no per-product node images** in the common case (platform consolidation,
 [memql#2472](https://github.com/znasllc-io/memql/issues/2472)). You **Use this
 template**, run `scripts/init.sh` once to stamp it in place, and you have a
 product repo. The engine and cockpit are cloned as **siblings in the parent
 directory** (the workspace); the composition at deploy time is **two ArgoCD
 Applications** (engine + product), never a cross-repo kustomize base.
+
+**`clients/` is plural on purpose.** memQL is a platform: one operator serving
+one customer may ship a marketing landing page, an operator SPA, and an embedded
+game -- three surfaces over one DSL, one bff head, one release. So a surface is
+`clients/<name>/`, and everything downstream derives from that directory name:
+the image `<product>-<name>`, the Deployment and Service `<product>-<name>`, the
+manifest `deploy/k8s/base/clients-<name>.yaml`, the release-lockfile component
+`<name>`. The starter ships exactly one, `clients/web/`; the root `Makefile`,
+CI, and `publish-images.yml` discover the set by listing `clients/`, so
+`cp -R clients/web clients/game` plus a manifest and an overlay route is a
+working second surface. The convention (and the engine's matching
+`clients/README.md`) is in [`clients/README.md`](clients/README.md).
 
 When a product genuinely needs one-of-a-kind Go that pure DSL and engine-generic
 capabilities cannot express, the thin optional `bff/` escape hatch
@@ -20,8 +32,10 @@ capabilities cannot express, the thin optional `bff/` escape hatch
 ```
 <workspace>/                    the parent directory (created by init.sh clones)
 ├── <product>/                  THIS repo, stamped -- the whole product
-│   ├── dsl/<product>/          the product DSL (.memql): the whole product surface
-│   ├── client/                 the product frontend (SPA)
+│   ├── dsl/<product>/          the product DSL (.memql): the whole data surface
+│   ├── clients/                the product's client surfaces (PLURAL)
+│   │   ├── README.md           the convention + how to add a surface
+│   │   └── web/                the starter surface (Vite + React + TS SPA)
 │   ├── deploy/                 DSL-bundle image + kustomize overlays + ArgoCD manifests
 │   ├── product.env             product identity every operational file reads
 │   └── Makefile                local stack lifecycle (make up|dev|status|down)
@@ -45,8 +59,8 @@ product boots a full stack with zero engine-repo edits.**
 
    This writes `product.env`; renames `dsl/__PRODUCT__/` -> `dsl/acme/`;
    substitutes the tokens below only where a tool cannot read `product.env` at
-   runtime (DSL contents, k8s/ArgoCD manifest fields, the client package +
-   boot defaults, `ONBOARDING.md`, `CLAUDE.md`); clones `../memql` and
+   runtime (DSL contents, k8s/ArgoCD manifest fields, each client surface's
+   package + boot defaults, `ONBOARDING.md`, `CLAUDE.md`); clones `../memql` and
    `../memql-cockpit` as siblings; and prunes the template-only artifacts
    (`template-ci.yml`, `product.env.example`) plus this README (replaced with a
    product stub). Pass `--registry=...` for a real image registry (default:
@@ -65,11 +79,11 @@ product boots a full stack with zero engine-repo edits.**
    `../memql`):
 
    ```bash
-   make up          # engine mesh + this product (bff + SPA + DSL) on local k3d
+   make up          # engine mesh + this product (bff + every client + DSL) on local k3d
    make dev         # rebuild the DSL bundle and re-mount it on the bff
    make status      # product Application + mesh status
    make down        # tear down
-   cd client && make dev   # the SPA HMR inner loop (Vite on :8080)
+   make -C clients/web dev   # one surface's HMR inner loop (Vite on :8080)
    ```
 
    The front door serves `https://identity.<domain>`, `https://bff.<domain>`,
@@ -161,7 +175,7 @@ the engine; product-specific -> the product repo.
 | `scripts/lib/capability.sh` | vendored capability-script runtime from the engine |
 | `product.env.example` | the product-identity template (pruned by init) |
 | `dsl/__PRODUCT__/` | the starter DSL pack (pure DSL; loads + runs on a plain engine) |
-| `client/` | the client SPA shell (self-contained; builds at stamp time) |
+| `clients/` | the product's client surfaces (plural); `clients/web/` is the self-contained starter, `clients/README.md` the convention |
 | `deploy/` | bundle image + kustomize overlays + ArgoCD manifests |
 | `ONBOARDING.md` / `CLAUDE.md` | dev guide + agent guide the stamp personalizes |
 | `.github/workflows/` | `template-ci.yml` (template-only), `ci.yml` (product CI), `gitleaks.yml` |

@@ -2,7 +2,7 @@
 # deploy/argocd/apps/__PRODUCT__-prod.yaml. PROD IS A STARTER PLACEHOLDER kept
 # coherent with staging.
 #
-# Owns ONLY product resources (bff head + SPA + public entry + runtime DSL
+# Owns ONLY product resources (bff head + client surfaces + public entry + DSL
 # bundle); the engine mesh is the separate engine Application. OAuth client
 # registration is engine-side (see the staging overlay comment). The product
 # image digests are all-zeros and FAIL CLOSED.
@@ -53,6 +53,8 @@ images:
   - name: memql-dsl-bundle
     newName: __REGISTRY__/__PRODUCT__-dsl-bundle
     digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
-  - name: __PRODUCT__-client
-    newName: __REGISTRY__/__PRODUCT__-client
+  # One pin PER CLIENT SURFACE (clients/README.md), digest-pinned in the
+  # product registry. A second surface adds a second block here.
+  - name: __PRODUCT__-web
+    newName: __REGISTRY__/__PRODUCT__-web
     digest: sha256:0000000000000000000000000000000000000000000000000000000000000000

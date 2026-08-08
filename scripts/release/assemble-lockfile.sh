@@ -3,10 +3,17 @@
 # scripts/release/assemble-lockfile.sh
 # ====================================
 #
-# Assemble an IMMUTABLE release lockfile from the two product image digests that
-# publish-images.yml pushed. A release = {engine ref, DSL-bundle digest, client
-# digest}: the lockfile pins each product component by @sha256 so an overlay
-# renders the EXACT bytes CI built.
+# Assemble an IMMUTABLE release lockfile from the product image digests that
+# publish-images.yml pushed. A release = {engine ref, DSL-bundle digest, ONE
+# DIGEST PER CLIENT SURFACE}: the lockfile pins each product component by
+# @sha256 so an overlay renders the EXACT bytes CI built.
+#
+# Client surfaces are PLURAL (clients/README.md): --client-digests takes a
+# comma-separated <surface>=<digest> list, one entry per clients/<surface>/, and
+# each becomes its own lockfile component keyed by the surface name. The
+# component's image is <registry>/<product>-<surface>, the same
+# `<product>-<surface>` rule the Deployment, Service and kustomize image key
+# derive from.
 #
 # GENERIC / TEMPLATE-OWNED: reads product identity from product.env (PRODUCT,
 # REGISTRY, ENGINE_REF); no product name is baked in. A second product wants
@@ -22,7 +29,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/capability.sh"
 cap_init "release.assemble-lockfile" "Write deploy/releases/<release>.yaml pinning the product images by digest."
 cap_spec_param "release"       "release id / immutable tag (required)"
 cap_spec_param "bundle-digest" "sha256:<64hex> digest of the DSL-bundle image (required)"
-cap_spec_param "client-digest" "sha256:<64hex> digest of the client SPA image (required)"
+cap_spec_param "client-digests" "comma-separated <surface>=sha256:<64hex> list, one per client surface, e.g. 'web=sha256:aa..,game=sha256:bb..' (required)"
 cap_spec_param "engine-ref"    "engine ref this release ships against (default: ENGINE_REF from product.env)"
 cap_spec_param "registry"      "registry host/path (default: REGISTRY from product.env)"
 cap_spec_param "out"           "output path (default: deploy/releases/<release>.yaml)"
@@ -31,6 +38,7 @@ cap_spec_param "force"         "overwrite an existing lockfile whose content dif
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 function valid_digest() { [[ "$1" =~ ^sha256:[0-9a-f]{64}$ ]]; }
+function valid_surface() { [[ "$1" =~ ^[a-z][a-z0-9-]*$ ]]; }
 
 function main() {
     cap_handle_meta "$@"
@@ -42,20 +50,43 @@ function main() {
         . "$REPO_ROOT/product.env"
     fi
 
-    local release bundle client engine_ref registry out
+    local release bundle clients engine_ref registry out
     release="$(cap_param release "")"
     bundle="$(cap_param bundle-digest "")"
-    client="$(cap_param client-digest "")"
+    clients="$(cap_param client-digests "")"
     engine_ref="$(cap_param engine-ref "${ENGINE_REF:-}")"
     registry="$(cap_param registry "${REGISTRY:-}")"
 
     cap_require release "$release"
     cap_require bundle-digest "$bundle"
-    cap_require client-digest "$client"
+    cap_require client-digests "$clients"
     [ -n "${PRODUCT:-}" ] || cap_fail 4 "PRODUCT not set -- run scripts/init.sh (product.env missing?)"
     [ -n "$registry" ]    || cap_fail 4 "no registry -- set REGISTRY in product.env or pass --registry"
     valid_digest "$bundle" || cap_fail 2 "--bundle-digest is not a sha256:<64hex> pin: $bundle"
-    valid_digest "$client" || cap_fail 2 "--client-digest is not a sha256:<64hex> pin: $client"
+
+    # Parse + validate the <surface>=<digest> list BEFORE writing anything, so a
+    # malformed entry is exit 2 with no half-written lockfile. Surface names must
+    # be unique (a duplicate would silently drop a surface from the release).
+    local -a surfaces=() digests=() parts=()
+    local entry name dig seen
+    # Split on commas WITHOUT touching the global IFS or relying on unquoted
+    # word-splitting: read -a with a scoped IFS is the safe idiom.
+    IFS=',' read -r -a parts <<< "$clients"
+    for entry in ${parts[@]+"${parts[@]}"}; do
+        [ -n "$entry" ] || continue
+        case "$entry" in
+            *=*) name="${entry%%=*}"; dig="${entry#*=}" ;;
+            *)   cap_fail 2 "--client-digests entry '$entry' is not <surface>=<digest>" ;;
+        esac
+        valid_surface "$name" || cap_fail 2 "--client-digests surface '$name' is not a slug (^[a-z][a-z0-9-]*\$)"
+        [ "$name" != "dsl-bundle" ] || cap_fail 2 "--client-digests surface 'dsl-bundle' collides with the bundle component"
+        valid_digest "$dig" || cap_fail 2 "--client-digests digest for '$name' is not a sha256:<64hex> pin: $dig"
+        for seen in ${surfaces[@]+"${surfaces[@]}"}; do
+            [ "$seen" != "$name" ] || cap_fail 2 "--client-digests names surface '$name' twice"
+        done
+        surfaces+=("$name"); digests+=("$dig")
+    done
+    [ "${#surfaces[@]}" -gt 0 ] || cap_fail 2 "--client-digests parsed to zero surfaces: '$clients'"
 
     out="$(cap_param out "$REPO_ROOT/deploy/releases/$release.yaml")"
     local force; force="$(cap_flag force)"
@@ -76,9 +107,12 @@ function main() {
         printf '  dsl-bundle:\n'
         printf '    image: "%s/%s-dsl-bundle"\n' "$registry" "$PRODUCT"
         printf '    digest: "%s"\n' "$bundle"
-        printf '  client:\n'
-        printf '    image: "%s/%s-client"\n' "$registry" "$PRODUCT"
-        printf '    digest: "%s"\n' "$client"
+        local i
+        for i in "${!surfaces[@]}"; do
+            printf '  %s:\n' "${surfaces[$i]}"
+            printf '    image: "%s/%s-%s"\n' "$registry" "$PRODUCT" "${surfaces[$i]}"
+            printf '    digest: "%s"\n' "${digests[$i]}"
+        done
     } > "$tmp"
 
     if [ -f "$out" ]; then
@@ -106,8 +140,9 @@ function main() {
 
     cap_result_set    release "$release"
     cap_result_set    lockfile "$out"
-    cap_result_set    bundleDigest "$bundle"
-    cap_result_set    clientDigest "$client"
+    cap_result_set     bundleDigest "$bundle"
+    cap_result_set     clients "$(IFS=,; printf '%s' "${surfaces[*]}")"
+    cap_result_set_raw components "$(( 1 + ${#surfaces[@]} ))"
     # changed is set per-branch above (write/overwrite -> true; no-op -> false),
     # honoring the idempotency signal rather than always claiming a mutation.
     cap_ok

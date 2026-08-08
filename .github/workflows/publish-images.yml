@@ -1,8 +1,14 @@
 name: publish-images
 
-# Build the product's two images -- the DSL bundle (deploy/Dockerfile.bundle) and
-# the SPA (client/Dockerfile) -- and push them to the product registry,
-# digest-pinned, so a staging/prod overlay can be pinned by @sha256.
+# Build the product's images -- the DSL bundle (deploy/Dockerfile.bundle) plus
+# ONE per client surface (clients/<name>/Dockerfile) -- and push them to the
+# product registry, digest-pinned, so a staging/prod overlay can be pinned by
+# @sha256.
+#
+# Client surfaces are PLURAL (clients/README.md) and are DISCOVERED by listing
+# clients/, never enumerated here: a product that adds clients/game/ gets its
+# image built, pushed, digested and added to the emitted lockfile with no edit
+# to this workflow.
 #
 # GENERIC / TEMPLATE-OWNED: this workflow bakes NO product name. It reads product
 # identity from product.env (PRODUCT, PRODUCT_ORG, REGISTRY) at run time, so it
@@ -37,11 +43,11 @@ on:
         type: boolean
         default: true
       vite_memql_http_url:
-        description: "SPA build arg VITE_MEMQL_HTTP_URL -- the bff front door the browser talks to. Leave blank to keep the Dockerfile default (starter/sim). See the SPA build-time caveat in deploy/releases/README.md."
+        description: "Client build arg VITE_MEMQL_HTTP_URL (applied to EVERY surface) -- the bff front door the browser talks to. Leave blank to keep each Dockerfile's default (starter/sim). See the build-time caveat in deploy/releases/README.md."
         required: false
         type: string
       vite_identity_base_url:
-        description: "SPA build arg VITE_IDENTITY_BASE_URL -- the magic-link + JWKS host. Leave blank to keep the Dockerfile default. Baking these makes the client digest env-specific (see caveat)."
+        description: "Client build arg VITE_IDENTITY_BASE_URL (applied to EVERY surface) -- the magic-link + JWKS host. Leave blank to keep the Dockerfile default. Baking these makes each client digest env-specific (see caveat)."
         required: false
         type: string
 
@@ -106,7 +112,8 @@ jobs:
           # The starter is self-contained (public deps only), so this is unused
           # today; the Dockerfile marks the BuildKit secret required=false.
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # SPA build-time envelope (client/Dockerfile's two documented VITE_ ARGs).
+          # Client build-time envelope (each surface Dockerfile's two documented
+          # VITE_ ARGs). Applied to EVERY surface in the run.
           # Empty -> the Dockerfile default (starter/sim single-DOMAIN fallback).
           # NON-empty -> a correctly-configured but ENV-SPECIFIC client digest;
           # see the SPA build-time caveat in deploy/releases/README.md before
@@ -131,39 +138,59 @@ jobs:
           # node. Pinning keeps the pushed digest's arch honest regardless of runner.
           PLATFORM="linux/amd64"
 
-          # build_one <output-key> <image-suffix> <dockerfile> <context> [extra docker build args...]
+          # Per-component results, one TSV row of "<component>\t<image>\t<digest>".
+          # The component set is DYNAMIC (one row per client surface plus the
+          # bundle), so results ride a file rather than statically-named step
+          # outputs the summary step would have to know the names of.
+          COMPONENTS_TSV="$RUNNER_TEMP/components.tsv"
+          : > "$COMPONENTS_TSV"
+          echo "components_tsv=$COMPONENTS_TSV" >> "$GITHUB_OUTPUT"
+
+          # build_one <component> <dockerfile> <context> [extra docker build args...]
+          # <component> is both the image suffix (<product>-<component>) and the
+          # release-lockfile component key.
           build_one() {
-            local key="$1" suffix="$2" dockerfile="$3" context="$4"; shift 4
-            local ref="$REGISTRY/$PRODUCT-$suffix"
+            local comp="$1" dockerfile="$2" context="$3"; shift 3
+            local ref="$REGISTRY/$PRODUCT-$comp"
             echo "==> build $ref:$TAG (--platform $PLATFORM -f $dockerfile $context)" >&2
             docker build --platform="$PLATFORM" -f "$dockerfile" -t "$ref:$TAG" "$@" "$context" >&2
-            printf '%s_image=%s\n' "$key" "$ref" >> "$GITHUB_OUTPUT"
             if [ "$PUSH" != "true" ]; then
-              echo "build-only (push disabled): skipping push + digest for $suffix" >&2
-              printf '%s_digest=\n' "$key" >> "$GITHUB_OUTPUT"
+              echo "build-only (push disabled): skipping push + digest for $comp" >&2
+              printf '%s\t%s\t\n' "$comp" "$ref" >> "$COMPONENTS_TSV"
               return 0
             fi
             docker push "$ref:$TAG" >&2
             local digest; digest="$(push_digest "$ref")"
             [ -n "$digest" ] || { echo "ERROR: could not resolve pushed digest for $ref:$TAG" >&2; exit 1; }
-            echo "    $suffix -> $digest" >&2
-            printf '%s_digest=%s\n' "$key" "$digest" >> "$GITHUB_OUTPUT"
+            echo "    $comp -> $digest" >&2
+            printf '%s\t%s\t%s\n' "$comp" "$ref" "$digest" >> "$COMPONENTS_TSV"
           }
 
           # The DSL bundle: data-only image, build context is the repo root so
           # `COPY dsl /bundle` resolves (deploy/Dockerfile.bundle).
-          build_one bundle dsl-bundle deploy/Dockerfile.bundle .
+          build_one dsl-bundle deploy/Dockerfile.bundle .
 
-          # The SPA: BuildKit secret carries NODE_AUTH_TOKEN (optional), context
-          # is client/. The two documented VITE_ build args are fed from the
-          # dispatch inputs; when both are blank the Dockerfile defaults hold (the
-          # starter SPA runs on sim data until the live memql seam is wired), so
-          # this is a no-op for the starter. Passing empty --build-arg values is
-          # safe: the ARGs default to empty in client/Dockerfile.
-          build_one client client client/Dockerfile client \
-            --secret id=node_auth_token,env=NODE_AUTH_TOKEN \
-            --build-arg VITE_MEMQL_HTTP_URL="$VITE_MEMQL_HTTP_URL" \
-            --build-arg VITE_IDENTITY_BASE_URL="$VITE_IDENTITY_BASE_URL"
+          # One image PER CLIENT SURFACE, discovered by listing clients/. Each
+          # surface's image is <registry>/<product>-<surface> (the same
+          # <product>-<surface> rule the Deployment/Service/kustomize key use),
+          # its context is its own directory, and its BuildKit secret carries
+          # NODE_AUTH_TOKEN (optional). The two documented VITE_ build args are
+          # fed from the dispatch inputs; when both are blank each Dockerfile's
+          # defaults hold, so this is a no-op for the starter. Passing empty
+          # --build-arg values is safe: the ARGs default to empty.
+          surfaces="$(find clients -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)"
+          [ -n "$surfaces" ] || { echo "ERROR: no client surfaces under clients/ -- see clients/README.md" >&2; exit 1; }
+          for surface in $surfaces; do
+            [ -f "clients/$surface/Dockerfile" ] || { echo "ERROR: clients/$surface has no Dockerfile" >&2; exit 1; }
+            build_one "$surface" "clients/$surface/Dockerfile" "clients/$surface" \
+              --secret id=node_auth_token,env=NODE_AUTH_TOKEN \
+              --build-arg VITE_MEMQL_HTTP_URL="$VITE_MEMQL_HTTP_URL" \
+              --build-arg VITE_IDENTITY_BASE_URL="$VITE_IDENTITY_BASE_URL"
+          done
+          # Hand the per-component results to the summary step as a file: the
+          # component set is dynamic, so it cannot ride statically-named
+          # step outputs.
+          printf 'surfaces=%s\n' "$(printf '%s' "$surfaces" | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
 
       - name: emit release lockfile + digest summary
         if: ${{ inputs.push }}
@@ -171,39 +198,42 @@ jobs:
           REGISTRY: ${{ steps.cfg.outputs.registry }}
           PRODUCT: ${{ steps.cfg.outputs.product }}
           TAG: ${{ steps.cfg.outputs.tag }}
-          BUNDLE_IMAGE: ${{ steps.build.outputs.bundle_image }}
-          BUNDLE_DIGEST: ${{ steps.build.outputs.bundle_digest }}
-          CLIENT_IMAGE: ${{ steps.build.outputs.client_image }}
-          CLIENT_DIGEST: ${{ steps.build.outputs.client_digest }}
+          COMPONENTS_TSV: ${{ steps.build.outputs.components_tsv }}
         run: |
           set -euo pipefail
-          # ENGINE_REF for the lockfile's builtAgainstEngine coherence field.
-          # Read it in a SUBSHELL: a plain `. ./product.env` here re-sets REGISTRY
-          # and PRODUCT to product.env's own values, clobbering the RESOLVED ones
-          # this step already received from steps.cfg (which honor the dispatch
-          # 'registry' input and may differ from -- or be empty in -- product.env).
-          # The subshell reads ENGINE_REF without leaking product.env into the step.
+          [ -s "$COMPONENTS_TSV" ] || { echo "ERROR: no components were built" >&2; exit 1; }
+
+          # ENGINE_REF for the lockfile's engineRef coherence field. Read it in a
+          # SUBSHELL: a plain `. ./product.env` here re-sets REGISTRY and PRODUCT
+          # to product.env's own values, clobbering the RESOLVED ones this step
+          # already received from steps.cfg (which honor the dispatch 'registry'
+          # input and may differ from -- or be empty in -- product.env). The
+          # subshell reads ENGINE_REF without leaking product.env into the step.
           engine_ref=""
           if [ -f product.env ]; then
             # shellcheck disable=SC1091
             engine_ref="$(. ./product.env && printf '%s' "${ENGINE_REF:-}")"
           fi
 
+          # The --client-digests argument assemble-lockfile.sh takes: every
+          # component EXCEPT the bundle, as <surface>=<digest>, comma-separated.
+          client_digests="$(awk -F'\t' '$1 != "dsl-bundle" { printf "%s%s=%s", sep, $1, $3; sep="," }' "$COMPONENTS_TSV")"
+          bundle_digest="$(awk -F'\t' '$1 == "dsl-bundle" { print $3 }' "$COMPONENTS_TSV")"
+
           {
             echo "## publish-images: $PRODUCT @ $TAG"
             echo ""
             echo "| component | image | digest |"
             echo "|-----------|-------|--------|"
-            echo "| dsl-bundle | \`$BUNDLE_IMAGE\` | \`$BUNDLE_DIGEST\` |"
-            echo "| client | \`$CLIENT_IMAGE\` | \`$CLIENT_DIGEST\` |"
+            awk -F'\t' '{ printf "| %s | `%s` | `%s` |\n", $1, $2, $3 }' "$COMPONENTS_TSV"
             echo ""
             echo "Pin the overlay + assemble a lockfile with scripts/release/:"
             echo ""
             echo '```sh'
             echo "scripts/release/assemble-lockfile.sh \\"
             echo "  --release=$TAG --engine-ref=$engine_ref \\"
-            echo "  --bundle-digest=$BUNDLE_DIGEST \\"
-            echo "  --client-digest=$CLIENT_DIGEST"
+            echo "  --bundle-digest=$bundle_digest \\"
+            echo "  --client-digests=$client_digests"
             echo "scripts/release/promote.sh --release=$TAG --to-env=staging"
             echo '```'
             echo ""
@@ -215,11 +245,6 @@ jobs:
             echo "registry: \"$REGISTRY\""
             echo "engineRef: \"$engine_ref\""
             echo "components:"
-            echo "  dsl-bundle:"
-            echo "    image: \"$BUNDLE_IMAGE\""
-            echo "    digest: \"$BUNDLE_DIGEST\""
-            echo "  client:"
-            echo "    image: \"$CLIENT_IMAGE\""
-            echo "    digest: \"$CLIENT_DIGEST\""
+            awk -F'\t' '{ printf "  %s:\n    image: \"%s\"\n    digest: \"%s\"\n", $1, $2, $3 }' "$COMPONENTS_TSV"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

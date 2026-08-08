@@ -1,6 +1,6 @@
 # __PRODUCT__ STAGING overlay -- the product Application reconciled by
 # deploy/argocd/apps/__PRODUCT__-staging.yaml. It owns ONLY product resources:
-# the bff head + SPA (../../base), the runtime DSL bundle (the vendored
+# the bff head + client surfaces (../../base), the runtime DSL bundle (vendored
 # dsl-bundle component), and the public nginx/cert-manager entry. The engine
 # mesh (identity/voice/mcp/cognition/agent/planner/workbench + the neutral bff)
 # is the SEPARATE engine Application (two Applications, not a kustomize remote
@@ -58,9 +58,9 @@ patches:
 
 images:
   # The engine bff image the product bff runs -- pinned by TAG to the engine ref
-  # this product ships against (a release = {engine ref, bundle digest, client
-  # digest}). acrmemql.azurecr.io is the engine registry (stays literal, like
-  # the znasllc-io org).
+  # this product ships against (a release = {engine ref, bundle digest, one
+  # digest per client surface}). acrmemql.azurecr.io is the engine registry
+  # (stays literal, like the znasllc-io org).
   - name: memql-bff
     newName: acrmemql.azurecr.io/memql-bff
     newTag: __ENGINE_REF__
@@ -68,7 +68,8 @@ images:
   - name: memql-dsl-bundle
     newName: __REGISTRY__/__PRODUCT__-dsl-bundle
     digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
-  # The product SPA -- digest-pinned in the product registry.
-  - name: __PRODUCT__-client
-    newName: __REGISTRY__/__PRODUCT__-client
+  # One pin PER CLIENT SURFACE (clients/README.md), digest-pinned in the
+  # product registry. A second surface adds a second block here.
+  - name: __PRODUCT__-web
+    newName: __REGISTRY__/__PRODUCT__-web
     digest: sha256:0000000000000000000000000000000000000000000000000000000000000000

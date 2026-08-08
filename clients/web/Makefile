@@ -1,14 +1,22 @@
 # =============================================================================
-# Client Makefile -- the SPA dev loop for this product.
+# Client-surface Makefile -- the dev loop for ONE surface under clients/.
 # =============================================================================
 #
-# OPERATIONAL: byte-identical to the template, reads product.env; no
-# product-name tokens. It owns only the CLIENT dev loop (Vite dev server +
-# the SPA image build/import/roll). The STACK lifecycle (engine + cluster +
-# ArgoCD) lives in the ROOT Makefile -- `make -C .. up | dev | status | down`.
+# OPERATIONAL: byte-identical to the template AND to every sibling surface, so
+# `cp -R clients/web clients/game` needs no edit here. It names nothing: the
+# product comes from product.env, and the SURFACE comes from this directory's
+# own name ($(notdir $(CURDIR))). The root Makefile discovers surfaces by
+# listing clients/, so a copied directory joins the lifecycle automatically.
+#
+# It owns only the SURFACE dev loop (Vite dev server + this surface's image
+# build/import/roll). The STACK lifecycle (engine + cluster + ArgoCD) lives in
+# the ROOT Makefile -- `make -C ../.. up | dev | status | down`.
 
 # Product identity (written by scripts/init.sh; absent in the raw template).
--include ../product.env
+-include ../../product.env
+
+# The surface name -- this directory. Never hardcode it.
+CLIENT := $(notdir $(CURDIR))
 
 NPM := npm
 # The bff's entry on the local front door (traefik TLS on 443;
@@ -24,16 +32,16 @@ MEMQL_HTTP_URL ?= https://bff.$(DOMAIN)
 .PHONY: dev dev-frontend image build typecheck lint up status down
 
 ## Start the Vite dev server (proxies /memql to the bff; the dev-server port is
-## set by the client's vite config). The backend cluster must already be up --
-## `make -C .. up` brings it up.
+## set by this surface's vite config). The backend cluster must already be up --
+## `make -C ../.. up` brings it up.
 dev:
 	MEMQL_HTTP_URL=$(MEMQL_HTTP_URL) $(NPM) run dev
 
-## Alias for `dev` -- the lean client ships a frontend-only dev server.
+## Alias for `dev` -- the lean starter ships a frontend-only dev server.
 dev-frontend: dev
 
-## Build the SPA image from this checkout, import it into k3d, and roll the
-## in-cluster SPA Deployment. Invoked by the root `make up`.
+## Build this surface's image from this checkout, import it into k3d, and roll
+## the in-cluster Deployment. Invoked once per surface by the root `make up`.
 image:
 	@bash scripts/dev/build-image.sh
 
@@ -59,15 +67,15 @@ lint:
 
 ## Bring up the whole local stack (delegates to the root Makefile).
 up:
-	$(MAKE) -C .. up
+	$(MAKE) -C ../.. up
 
 ## Product Application + mesh status (delegates to the root Makefile).
 status:
-	$(MAKE) -C .. status
+	$(MAKE) -C ../.. status
 
 ## Tear down the local cluster (delegates to the root Makefile).
 down:
-	$(MAKE) -C .. down
+	$(MAKE) -C ../.. down
 
 # =============================================================================
 # HELP
@@ -76,11 +84,11 @@ down:
 .PHONY: help
 help:
 	@echo ""
-	@echo "$(if $(PRODUCT),$(PRODUCT),<product>) client"
+	@echo "$(if $(PRODUCT),$(PRODUCT),<product>) client surface: $(CLIENT)"
 	@echo ""
-	@echo "Client dev loop:"
+	@echo "Surface dev loop:"
 	@echo "  make dev         Vite dev server (port per vite config; cluster must be up)"
-	@echo "  make image       Build + import + roll the in-cluster SPA image"
+	@echo "  make image       Build + import + roll this surface's in-cluster image"
 	@echo "  make build       Production build (tsc + vite)"
 	@echo "  make typecheck   tsc --noEmit"
 	@echo "  make lint        bare-ids ESLint contract"

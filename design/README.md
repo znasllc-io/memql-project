@@ -13,8 +13,10 @@ design/
 ├── README.md          this file
 ├── mockups/           static comps / exported screens
 ├── flows/             user-flow + state diagrams
-└── tokens/            color / type / spacing tokens the client consumes
+└── tokens/            color / type / spacing tokens the clients consume
 ```
 
-The client (`../client/`) is the code that realizes these designs; keep the
-source of a screen here and its implementation there.
+The client surfaces (`../clients/<name>/`) are the code that realizes these
+designs; keep the source of a screen here and its implementation there. With
+more than one surface, mirror the surface names under `mockups/` so a comp is
+unambiguous about which surface it belongs to.

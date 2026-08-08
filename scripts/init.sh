@@ -13,9 +13,9 @@ set -euo pipefail
 #   3. substitutes the __PRODUCT__ / __PRODUCT_ORG__ / __DOMAIN__ / __ENGINE_REF__
 #      / __REGISTRY__ tokens ONLY where a tool genuinely cannot read product.env
 #      at runtime (dsl file contents, k8s/argocd manifest fields kustomize can't
-#      inject, the client package name/scope + boot defaults, ONBOARDING.md,
-#      CLAUDE.md); every operational file stays byte-identical so a later
-#      `git merge template/main` never conflicts on plumbing;
+#      inject, each client surface's package name/scope + boot defaults,
+#      ONBOARDING.md, CLAUDE.md); every operational file stays byte-identical
+#      so a later `git merge template/main` never conflicts on plumbing;
 #   4. clones ../memql (at --engine-ref) and ../memql-cockpit (at --cockpit-ref)
 #      as SIBLINGS in the PARENT directory (the workspace);
 #   5. prunes template-only artifacts (template-ci.yml, product.env.example) and
@@ -33,7 +33,7 @@ cap_spec_param "product"      "product name (required; ^[a-z][a-z0-9-]*$; e.g. '
 cap_spec_param "product-org"  "GitHub org/user owning this product repo (required; e.g. 'acme-io')"
 cap_spec_param "domain"       "the engine's fixed local domain (leave default for local; it is also the staging/prod public-entry placeholder) (default: local.znas.io)"
 cap_spec_param "engine-ref"   "engine ref to pin (default: the latest engine release tag, resolved at stamp time; falls back to main with a loud warning when offline)"
-cap_spec_param "registry"     "container registry for the product bundle + client images (default: empty = local-only)"
+cap_spec_param "registry"     "container registry for the product bundle + client-surface images (default: empty = local-only)"
 cap_spec_param "cockpit-ref"  "cockpit ref to clone (default: main)"
 cap_spec_param "skip-clones"  "do not clone the engine/cockpit siblings (flag; for CI + offline runs)"
 cap_spec_param "dry-run"      "report the stamp plan without changing anything (flag)"
@@ -63,16 +63,19 @@ CAP_KNOWN_FLAGS=" product product-org domain engine-ref registry cockpit-ref ski
 
 # Operational files init must NEVER touch (byte-identical template<->product, so
 # `git merge template/main` stays clean). Paths are relative to ROOT; a trailing
-# slash marks a directory prefix. README.md is handled separately (replaced).
+# slash marks a directory prefix; entries are shell GLOB patterns, so the
+# per-surface operational files are covered for EVERY clients/<name>/ a product
+# has (clients/ is plural -- see clients/README.md), not just the starter's
+# clients/web/. README.md is handled separately (replaced).
 CAP_SKIP_PATHS=(
     ".git/"
     "scripts/"
     ".github/"
-    "client/scripts/"
+    "clients/*/scripts/"
     "Makefile"
-    "client/Makefile"
+    "clients/*/Makefile"
     ".gitignore"
-    "client/.gitignore"
+    "clients/*/.gitignore"
     "LICENSE"
     "product.env"
     "product.env.example"
@@ -83,14 +86,13 @@ CAP_SKIP_PATHS=(
 # instead of the whole repo root). A product repo can carry non-template content
 # of its own whose files may contain token-like literals; walking only these
 # paths guarantees such content is never silently rewritten. is_skipped still
-# applies WITHIN them (e.g. it keeps
-# client/scripts/, client/Makefile, client/.gitignore byte-identical). Paths are
-# relative to ROOT; a directory is stamped recursively, a bare file on its own.
+# applies WITHIN them (e.g. it keeps clients/*/scripts/, clients/*/Makefile and
+# clients/*/.gitignore byte-identical). Paths are relative to ROOT; a directory is stamped recursively, a bare file on its own.
 # This list must stay in sync with print_dry_run_plan's "would stamp:" line and
 # with rename_token_paths (dsl/, deploy/ hold the token-bearing renamed paths).
 CAP_STAMP_PATHS=(
     "dsl"
-    "client"
+    "clients"
     "deploy"
     "ONBOARDING.md"
     "CLAUDE.md"
@@ -296,14 +298,19 @@ function sed_token_program() {
 }
 
 # is_skipped <relpath> -- true if the path is an operational file/dir init must
-# not substitute.
+# not substitute. Entries are GLOB patterns (matched UNQUOTED on the right of
+# [[ == ]], which is what makes `clients/*/Makefile` cover every surface); a
+# pattern with no metacharacters still matches literally, so plain paths behave
+# exactly as before.
 function is_skipped() {
     local rel="$1" p
     for p in "${CAP_SKIP_PATHS[@]}"; do
         if [[ "$p" == */ ]]; then
-            [[ "$rel" == "$p"* ]] && return 0
+            # shellcheck disable=SC2053  # glob match is intentional
+            [[ "$rel" == ${p}* ]] && return 0
         else
-            [[ "$rel" == "$p" ]] && return 0
+            # shellcheck disable=SC2053  # glob match is intentional
+            [[ "$rel" == $p ]] && return 0
         fi
     done
     return 1
@@ -358,7 +365,7 @@ function rename_token_paths() {
 # SCOPE: walks ONLY the template-owned CAP_STAMP_PATHS, never the whole repo root,
 # so a product repo's own content (its app, design assets) keeps any __TOKEN__-
 # looking literals verbatim. is_skipped still runs as a secondary guard for the
-# operational files nested inside those paths (e.g. client/scripts/).
+# operational files nested inside those paths (e.g. clients/*/scripts/).
 function substitute_tree() {
     local prog rel tmp p roots=()
     prog="$(sed_token_program)"
@@ -418,13 +425,16 @@ function replace_readme() {
     tmp="$(mktemp)"
     {
         printf '# %s\n\n' "$PRODUCT"
-        printf 'A **memQL product** -- a DSL bundle + a client running on the shared,\n'
-        printf 'product-agnostic [memQL engine](https://github.com/znasllc-io/memql). Stamped\n'
-        printf 'from the [memql-project](https://github.com/znasllc-io/memql-project) template.\n\n'
+        printf 'A **memQL product** -- a DSL bundle plus one or more client surfaces --\n'
+        printf 'running on the shared, product-agnostic\n'
+        printf '[memQL engine](https://github.com/znasllc-io/memql). Stamped from the\n'
+        printf '[memql-project](https://github.com/znasllc-io/memql-project) template.\n\n'
         printf '## Layout\n\n'
         printf -- '- `dsl/%s/` -- the product DSL (.memql): concepts, queries, mutations,\n' "$PRODUCT"
         printf '  shapes, tools, automations. The whole product surface; no product Go.\n'
-        printf -- '- `client/` -- the product frontend (Vite + React + TS SPA).\n'
+        printf -- '- `clients/<name>/` -- the product client surfaces; the starter ships\n'
+        printf '  `clients/web/` (Vite + React + TS SPA). Plural on purpose -- see\n'
+        printf '  `clients/README.md` for the convention and how to add another.\n'
         printf -- '- `deploy/` -- the DSL-bundle image (`Dockerfile.bundle`) + kustomize\n'
         printf '  overlays (local / staging / prod) + the ArgoCD project/app manifests.\n'
         printf -- '- `product.env` -- product identity every operational file reads.\n\n'
@@ -432,11 +442,11 @@ function replace_readme() {
         printf 'Requires the engine + cockpit checked out as siblings (`../memql`,\n'
         printf '`../memql-cockpit`) plus docker, k3d, kubectl, mkcert.\n\n'
         printf '```bash\n'
-        printf 'make up        # engine mesh + this product (bff + SPA + DSL) on local k3d\n'
+        printf 'make up        # engine mesh + this product (bff + clients + DSL) on local k3d\n'
         printf 'make dev       # rebuild the DSL bundle and re-mount it on the bff\n'
         printf 'make status    # product Application + mesh status\n'
         printf 'make down      # tear down\n'
-        printf 'cd client && make dev   # the SPA HMR inner loop (Vite on :8080)\n'
+        printf 'make -C clients/web dev # a client surface HMR inner loop (Vite on :8080)\n'
         printf '```\n\n'
         printf 'The front door serves https://identity.%s, https://bff.%s, https://app.%s.\n\n' "$DOMAIN" "$DOMAIN" "$DOMAIN"
         printf '## Staying in sync with the template\n\n'
@@ -492,7 +502,7 @@ function print_dry_run_plan() {
     cap_info "registry:     ${REGISTRY_VALUE:-<empty: local-only>}"
     cap_info "would write:  product.env"
     cap_info "would rename: dsl/__PRODUCT__/ -> dsl/$PRODUCT/, deploy/argocd/apps/__PRODUCT__-*.yaml"
-    cap_info "would stamp:  dsl/, deploy/, client/ (src+manifests+docs), ONBOARDING.md, CLAUDE.md"
+    cap_info "would stamp:  dsl/, deploy/, clients/ (every surface: src+manifests+docs), ONBOARDING.md, CLAUDE.md"
     cap_info "would prune:  .github/workflows/template-ci.yml, product.env.example; replace README.md with a product stub"
     if [[ -n "$SKIP_CLONES" ]]; then
         cap_info "would clone:  (skipped -- --skip-clones)"

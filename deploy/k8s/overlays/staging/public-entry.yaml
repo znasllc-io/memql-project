@@ -4,14 +4,16 @@
 #   - cert-manager (issues the Let's Encrypt certs referenced below)
 #
 # Hosts (all A records point at the ingress controller's static public IP):
-#   app.__DOMAIN__       -> __PRODUCT__ SPA (+ same-origin proxy to bff/identity)
+#   app.__DOMAIN__       -> the __PRODUCT__ `web` client surface (+ same-origin
+#                           proxy to bff/identity). A second surface takes its own
+#                           host rule here -- see clients/README.md.
 #   identity.__DOMAIN__  -> identity service (login UI, /setup, /admin)
 #   mcp.__DOMAIN__       -> mcp node (remote MCP head, /mcp)
 #   bff.__DOMAIN__       -> product bff raw gRPC (native clients, e.g. memql-cockpit)
 #
 # identity / voice / mcp are engine services (owned by the engine Application);
 # an Ingress routes to any Service in the namespace by name. /memql and / route
-# to the product's own bff-__PRODUCT__ and __PRODUCT__ Services.
+# to the product's own bff-__PRODUCT__ and __PRODUCT__-web Services.
 ---
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
@@ -49,7 +51,7 @@ spec:
         paths:
           - { path: /, pathType: Prefix, backend: { service: { name: identity, port: { number: 8085 } } } }
 ---
-# app.__DOMAIN__ main routes: SPA (/) -> __PRODUCT__, WS (/memql) -> product bff,
+# app.__DOMAIN__ main routes: / -> __PRODUCT__-web, WS (/memql) -> product bff,
 # audio WS (/memql/audio) -> voice. The audio path needs the voice node, so it
 # gets its own longer-prefix rule (wins over /memql). This Ingress owns the
 # host's TLS cert (cert-manager).
@@ -72,12 +74,12 @@ spec:
         paths:
           - { path: /memql/audio, pathType: Prefix, backend: { service: { name: voice, port: { number: 8085 } } } }
           - { path: /memql, pathType: Prefix, backend: { service: { name: bff-__PRODUCT__, port: { number: 8085 } } } }
-          - { path: /, pathType: Prefix, backend: { service: { name: __PRODUCT__, port: { number: 8080 } } } }
+          - { path: /, pathType: Prefix, backend: { service: { name: __PRODUCT__-web, port: { number: 8080 } } } }
 ---
 # app.__DOMAIN__ same-origin auth proxy: the token XHRs the SPA makes (relative
 # paths) must reach identity, NOT the SPA. Separate Ingress because these need
 # the HTTPS-backend annotation (identity serves TLS). Longest-prefix wins over
-# "/" above; /auth/callback (an SPA route) falls through to the SPA.
+# "/" above; /auth/callback (an SPA route) falls through to __PRODUCT__-web.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

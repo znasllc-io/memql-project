@@ -20,7 +20,7 @@ permissions:
   packages: read
 
 # PRODUCT CI: the lanes that ship to every stamped instance and also pass
-# in-template against the starter payload. Path-filtered (client/deploy/dsl),
+# in-template against the starter payload. Path-filtered (clients/deploy/dsl),
 # fail-open to running when the diff base is unknown (push / merge_group / first
 # push) so a lane is never falsely skipped.
 #
@@ -32,7 +32,7 @@ jobs:
     name: changes
     runs-on: ubuntu-latest
     outputs:
-      client: ${{ steps.filter.outputs.client }}
+      clients: ${{ steps.filter.outputs.clients }}
       deploy: ${{ steps.filter.outputs.deploy }}
       dsl: ${{ steps.filter.outputs.dsl }}
     steps:
@@ -52,7 +52,7 @@ jobs:
             pull_request) base="$BASE_SHA" ;;
             push)         base="$BEFORE_SHA" ;;
           esac
-          run_all() { echo "client=true" >> "$GITHUB_OUTPUT"; echo "deploy=true" >> "$GITHUB_OUTPUT"; echo "dsl=true" >> "$GITHUB_OUTPUT"; }
+          run_all() { echo "clients=true" >> "$GITHUB_OUTPUT"; echo "deploy=true" >> "$GITHUB_OUTPUT"; echo "dsl=true" >> "$GITHUB_OUTPUT"; }
           if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
             echo "diff base unknown ($EVENT_NAME) -> running all lanes"
             run_all; exit 0
@@ -62,7 +62,7 @@ jobs:
           emit() { if echo "$changed" | grep -qE "$2"; then echo "$1=true" >> "$GITHUB_OUTPUT"; else echo "$1=false" >> "$GITHUB_OUTPUT"; fi; }
           # A change to CI or the stamper re-runs everything (they affect all lanes).
           if echo "$changed" | grep -qE '^\.github/|^scripts/|^product\.env'; then run_all; exit 0; fi
-          emit client '^client/'
+          emit clients '^clients/'
           emit deploy '^deploy/'
           emit dsl    '^dsl/'
 
@@ -74,7 +74,9 @@ jobs:
       - name: shellcheck scripts
         run: |
           shellcheck --version
-          find scripts client/scripts -name '*.sh' -print0 | xargs -0 shellcheck --severity=warning
+          # scripts/ plus every client surface's scripts/ (clients/ is plural --
+          # see clients/README.md), found by walking rather than named one by one.
+          find scripts clients -name '*.sh' -print0 | xargs -0 shellcheck --severity=warning
 
   capability-conformance:
     name: capability-conformance
@@ -128,19 +130,19 @@ jobs:
           after="$(git status --porcelain)"
           [ "$before" = "$after" ] || { echo "dry-run mutated the tree" >&2; exit 1; }
 
-  client:
-    name: client
+  clients:
+    name: clients
     needs: changes
-    if: needs.changes.outputs.client == 'true'
+    if: needs.changes.outputs.clients == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4
         with:
           node-version: '20'
-      # The starter shell is SELF-CONTAINED (a thin local memQL client + a local
-      # generated concepts module) and installs with zero private SDKs. A
-      # stamped product that adopts the org SDK (client/.npmrc maps the org
+      # The starter surface is SELF-CONTAINED (a thin local memQL client + a
+      # local generated concepts module) and installs with zero private SDKs. A
+      # stamped product that adopts the org SDK (clients/<name>/.npmrc maps the org
       # scope to GitHub Packages) needs a token at install time, so the lane
       # provides NODE_AUTH_TOKEN unconditionally: the job's GITHUB_TOKEN
       # (packages: read) covers packages linked to the product repo; when the
@@ -149,24 +151,35 @@ jobs:
       # the optional NPM_PACKAGES_READ_TOKEN repo secret (a PAT with
       # read:packages) which takes precedence. The starter never consults the
       # token (no org-scoped deps), so the lane stays green in-template.
-      # The test step runs ONLY when the client defines a `test` script: a
+      # The test step runs ONLY when a surface defines a `test` script: a
       # product that drops in a vitest/jest suite rides it on this lane
       # automatically, while the starter (which ships no test script) skips it
       # gracefully so the lane stays green in-template.
-      - name: npm install + typecheck + build + lint (+ test when defined)
-        working-directory: client
+      - name: npm install + typecheck + build + lint (+ test when defined), per surface
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_PACKAGES_READ_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
-          npm install --no-audit --no-fund
-          npm run typecheck
-          npm run build
-          npm run lint
-          if [ "$(jq -r '.scripts.test // empty' package.json)" ]; then
-            npm test
-          else
-            echo "no client test script defined -- skipping npm test"
-          fi
+          set -euo pipefail
+          # EVERY client surface, discovered by listing clients/ -- a product
+          # that adds clients/game/ gets it checked here with no CI edit.
+          surfaces="$(find clients -mindepth 1 -maxdepth 1 -type d | sort)"
+          [ -n "$surfaces" ] || { echo "ERROR: no client surfaces under clients/ -- see clients/README.md" >&2; exit 1; }
+          for dir in $surfaces; do
+            echo "::group::$dir"
+            (
+              cd "$dir"
+              npm install --no-audit --no-fund
+              npm run typecheck
+              npm run build
+              npm run lint
+              if [ "$(jq -r '.scripts.test // empty' package.json)" ]; then
+                npm test
+              else
+                echo "no test script defined in $dir -- skipping npm test"
+              fi
+            )
+            echo "::endgroup::"
+          done
 
   deploy:
     name: deploy
@@ -184,15 +197,28 @@ jobs:
       - name: digest gate (staging/prod product images pinned by @sha256; local exempt)
         run: |
           set -euo pipefail
+          # The product's image set is the DSL bundle plus ONE PER CLIENT SURFACE
+          # (clients/ is plural -- see clients/README.md). Derive the expected
+          # set by listing clients/ so a product that adds a surface without
+          # pinning it in staging/prod fails here instead of shipping a
+          # half-pinned overlay.
+          surfaces="$(find clients -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)"
+          [ -n "$surfaces" ] || { echo "ERROR: no client surfaces under clients/ -- see clients/README.md" >&2; exit 1; }
+          expected=1
+          suffix_re='-dsl-bundle'
+          for c in $surfaces; do
+            suffix_re="$suffix_re|-$c"
+            expected=$((expected + 1))
+          done
+          echo "expecting $expected product image(s) per overlay: dsl-bundle + $surfaces"
           for o in staging prod; do
-            # Both product images (the DSL bundle + the client SPA) MUST render
-            # AND every product-image line MUST be digest-pinned. The positive
+            # EVERY product image MUST render AND be digest-pinned. The positive
             # count assertion (C4) stops the gate passing vacuously if an image
             # name drifts so the grep matches nothing.
-            imgs="$(grep -E '^\s*(-?\s*)?image:.*(-dsl-bundle|-client)' "/tmp/render-$o.yaml" || true)"
+            imgs="$(grep -E "^\s*(-?\s*)?image:.*($suffix_re)" "/tmp/render-$o.yaml" || true)"
             n="$(printf '%s\n' "$imgs" | grep -c . || true)"
-            if [ "$n" -lt 2 ]; then
-              echo "ERROR: $o overlay rendered $n product image(s); expected >=2 (the DSL bundle + the client). Image names may have drifted:" >&2
+            if [ "$n" -lt "$expected" ]; then
+              echo "ERROR: $o overlay rendered $n product image(s); expected >=$expected (the DSL bundle + one per client surface). An image name may have drifted, or a surface is unpinned in this overlay:" >&2
               printf '%s\n' "$imgs" >&2
               exit 1
             fi
@@ -204,8 +230,14 @@ jobs:
             fi
             echo "$o: $n product image(s), all digest-pinned"
           done
-          # The local overlay is exempt: it uses mutable :local tags for k3d import.
+          # The local overlay is exempt: it uses mutable :local tags for k3d
+          # import. Assert the bundle AND every surface render there too, so a
+          # surface missing from the local overlay is caught before `make up`.
           grep -qE 'dsl-bundle:local' /tmp/render-local.yaml
+          for c in $surfaces; do
+            grep -qE "image: [^ ]*-$c:local" /tmp/render-local.yaml \
+              || { echo "ERROR: local overlay pins no :local image for client surface '$c'" >&2; exit 1; }
+          done
           echo "digest gate OK"
 
   dsl:
@@ -271,7 +303,7 @@ jobs:
 
   ci-required:
     name: ci-required
-    needs: [changes, shellcheck, capability-conformance, client, deploy, dsl]
+    needs: [changes, shellcheck, capability-conformance, clients, deploy, dsl]
     if: always()
     runs-on: ubuntu-latest
     steps:
