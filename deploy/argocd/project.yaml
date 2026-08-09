@@ -1,6 +1,6 @@
 # AppProject scoping the __PRODUCT__ product's GitOps surface. It scopes the
 # LOCAL cluster's product Application (deploy/k8s/overlays/local -- the bff head +
-# SPA), applied by the root `make up` via the engine's up.sh
+# client surfaces), applied by the root `make up` via the engine's up.sh
 # (--project-manifest), and the STAGING/PROD Applications
 # (apps/__PRODUCT__-{staging,prod}.yaml).
 #
@@ -16,7 +16,7 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  description: __PRODUCT__ product resources (bff head + SPA + public entry) layered on the memql engine mesh
+  description: __PRODUCT__ product resources (bff head + client surfaces + public entry) layered on the memql engine mesh
   sourceRepos:
     - https://github.com/__PRODUCT_ORG__/__PRODUCT__.git
   destinations:

@@ -73,7 +73,7 @@ jobs:
 
       - name: non-template content is left untouched (scoped stamping) (#15)
         # substitute_tree is scoped to template-owned paths, so the planted decoy
-        # (a __TOKEN__-bearing file outside dsl/client/deploy + the stamped docs)
+        # (a __TOKEN__-bearing file outside dsl/clients/deploy + the stamped docs)
         # must be unchanged. Assert byte-for-byte, then remove it so the remaining
         # steps see the clean stamped tree (e.g. the zero-token grep below).
         run: |
@@ -89,7 +89,7 @@ jobs:
         # legitimately references the token literals it substitutes. A blanket
         # --exclude-dir=scripts also blinds the check to client/scripts/ (C3), so
         # instead grep the whole tree and drop only matches under ./scripts/.
-        # Everything init is meant to stamp (dsl/deploy/client/docs) must be
+        # Everything init is meant to stamp (dsl/deploy/clients/docs) must be
         # token-free, __PRODUCT_ID__ included.
         run: |
           cd "$STAMP_DIR"
@@ -119,9 +119,20 @@ jobs:
           cd "$STAMP_DIR"
           test -d "dsl/$PRODUCT"
           test ! -e dsl/__PRODUCT__
+          # clients/ is PLURAL and init stamps the FIRST surface's concrete name
+          # into it. The singular client/ is gone for good -- assert that too, so
+          # a half-applied revert of the plural move cannot pass this gate.
+          test -d "clients/$PRODUCT-client"
+          test ! -e clients/__PRODUCT__-client
+          test ! -e client
+          test -f "clients/$PRODUCT-client/package.json"
+          grep -q "\"name\": \"$PRODUCT-client\"" "clients/$PRODUCT-client/package.json"
           test -f "deploy/argocd/apps/$PRODUCT-staging.yaml"
           test -f "deploy/argocd/apps/$PRODUCT-prod.yaml"
           test -f product.env && grep -qx "PRODUCT=$PRODUCT" product.env
+          # CLIENT names the primary surface's directory (also its package name
+          # and its image name) -- the seam operational files resolve it through.
+          grep -qx "CLIENT=$PRODUCT-client" product.env
           test ! -e product.env.example
           test ! -e .github/workflows/template-ci.yml   # pruned in the stamped copy
 
@@ -197,13 +208,18 @@ jobs:
             echo "$o: SERVER_ALLOWED_ORIGINS=$v"
           done
 
-      - name: client npm install + typecheck + build + lint (stamped, self-contained)
-        working-directory: ${{ env.STAMP_DIR }}/client
+      - name: every client surface installs + typechecks + builds + lints (stamped, self-contained)
         run: |
-          npm install --no-audit --no-fund
-          npm run typecheck
-          npm run build
-          npm run lint
+          set -euo pipefail
+          cd "$STAMP_DIR"
+          found=0
+          for d in clients/*/; do
+            [ -f "$d/package.json" ] || continue
+            found=$((found + 1))
+            echo "==> $d"
+            ( cd "$d" && npm install --no-audit --no-fund && npm run typecheck && npm run build && npm run lint )
+          done
+          [ "$found" -gt 0 ] || { echo "ERROR: stamped tree has no clients/*/package.json" >&2; exit 1; }
 
       - name: idempotent re-run reports changed:false
         run: |
@@ -215,11 +231,11 @@ jobs:
         run: |
           set -uo pipefail
           cd "$STAMP_DIR"
-          before="$(find . -path ./client/node_modules -prune -o -type f -print | sort | xargs cksum 2>/dev/null | cksum)"
+          before="$(find . -path './clients/*/node_modules' -prune -o -type f -print | sort | xargs cksum 2>/dev/null | cksum)"
           set +e
           out="$(scripts/init.sh --product=other --product-org=demo-org --skip-clones 2>/dev/null)"; code=$?
           set -e
-          after="$(find . -path ./client/node_modules -prune -o -type f -print | sort | xargs cksum 2>/dev/null | cksum)"
+          after="$(find . -path './clients/*/node_modules' -prune -o -type f -print | sort | xargs cksum 2>/dev/null | cksum)"
           [ "$code" -eq 3 ] || { echo "ERROR: identity change exit=$code (want 3)" >&2; exit 1; }
           echo "$out" | jq -e '.ok == false and .error.code == 3' > /dev/null
           [ "$before" = "$after" ] || { echo "ERROR: refused re-run mutated the tree" >&2; exit 1; }

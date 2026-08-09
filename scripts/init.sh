@@ -8,8 +8,10 @@ set -euo pipefail
 # this template" + init.sh replaces the old workspace-root + bootstrap.sh model
 # (which stamped sibling bundle/client repos). init.sh, on the current checkout:
 #   1. writes product.env (the single source of product identity every
-#      operational file -- Makefiles, scripts, CI -- reads);
-#   2. renames dsl/__PRODUCT__/ -> dsl/<product>/ and the argocd app files;
+#      operational file -- Makefiles, scripts, CI -- reads), including CLIENT:
+#      the directory under clients/ holding the product's FIRST client surface;
+#   2. renames dsl/__PRODUCT__/ -> dsl/<product>/, clients/__PRODUCT__-client/ ->
+#      clients/<product>-client/, and the argocd app files;
 #   3. substitutes the __PRODUCT__ / __PRODUCT_ORG__ / __DOMAIN__ / __ENGINE_REF__
 #      / __REGISTRY__ tokens ONLY where a tool genuinely cannot read product.env
 #      at runtime (dsl file contents, k8s/argocd manifest fields kustomize can't
@@ -63,16 +65,19 @@ CAP_KNOWN_FLAGS=" product product-org domain engine-ref registry cockpit-ref ski
 
 # Operational files init must NEVER touch (byte-identical template<->product, so
 # `git merge template/main` stays clean). Paths are relative to ROOT; a trailing
-# slash marks a directory prefix. README.md is handled separately (replaced).
+# slash marks a directory prefix. Entries are GLOB patterns (matched with bash
+# `==` pattern matching), so the per-client operational files stay covered under
+# the plural clients/<name>/ layout no matter what a surface is called.
+# README.md is handled separately (replaced).
 CAP_SKIP_PATHS=(
     ".git/"
     "scripts/"
     ".github/"
-    "client/scripts/"
+    "clients/*/scripts/"
     "Makefile"
-    "client/Makefile"
+    "clients/*/Makefile"
     ".gitignore"
-    "client/.gitignore"
+    "clients/*/.gitignore"
     "LICENSE"
     "product.env"
     "product.env.example"
@@ -83,14 +88,15 @@ CAP_SKIP_PATHS=(
 # instead of the whole repo root). A product repo can carry non-template content
 # of its own whose files may contain token-like literals; walking only these
 # paths guarantees such content is never silently rewritten. is_skipped still
-# applies WITHIN them (e.g. it keeps
-# client/scripts/, client/Makefile, client/.gitignore byte-identical). Paths are
+# applies WITHIN them (e.g. it keeps clients/<name>/scripts/,
+# clients/<name>/Makefile, clients/<name>/.gitignore byte-identical). Paths are
 # relative to ROOT; a directory is stamped recursively, a bare file on its own.
 # This list must stay in sync with print_dry_run_plan's "would stamp:" line and
-# with rename_token_paths (dsl/, deploy/ hold the token-bearing renamed paths).
+# with rename_token_paths (dsl/, clients/, deploy/ hold the token-bearing
+# renamed paths).
 CAP_STAMP_PATHS=(
     "dsl"
-    "client"
+    "clients"
     "deploy"
     "ONBOARDING.md"
     "CLAUDE.md"
@@ -143,6 +149,11 @@ function validate_params() {
 #   engine-ref git ref chars (slashes ok, no &|\ ws)  [A-Za-z0-9._/-]
 #   registry   host[:port][/path] chars               [A-Za-z0-9._:/-]
 function validate_substitution_values() {
+    # CLIENT names a directory under clients/ (and an image + package name), so
+    # it must be a plain slug. It is normally derived, but product.env may carry
+    # a hand-edited value that reconcile_with_existing_env just adopted.
+    [[ "$CLIENT" =~ ^[a-z][a-z0-9-]*$ ]] \
+        || cap_fail 2 "invalid CLIENT '$CLIENT' in product.env (want a slug: ^[a-z][a-z0-9-]*$; it names a directory under clients/)"
     [[ "$DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]] \
         || cap_fail 2 "invalid --domain '$DOMAIN' (want a hostname: ^[A-Za-z0-9.-]+$; no whitespace or sed metacharacters)"
     if [[ -n "$ENGINE_REF" ]]; then
@@ -163,6 +174,7 @@ function validate_substitution_values() {
 function read_existing_env() {
     EXISTING_PRODUCT=""; EXISTING_ORG=""; EXISTING_DOMAIN=""
     EXISTING_ENGINE_REF=""; EXISTING_REGISTRY=""; EXISTING_REGISTRY_SET=0
+    EXISTING_CLIENT=""
     local f="$ROOT/product.env" line k v
     [[ -f "$f" ]] || return 0
     while IFS= read -r line || [[ -n "$line" ]]; do
@@ -174,6 +186,7 @@ function read_existing_env() {
             DOMAIN)      EXISTING_DOMAIN="$v" ;;
             ENGINE_REF)  EXISTING_ENGINE_REF="$v" ;;
             REGISTRY)    EXISTING_REGISTRY="$v"; EXISTING_REGISTRY_SET=1 ;;
+            CLIENT)      EXISTING_CLIENT="$v" ;;
         esac
     done < "$f"
     return 0
@@ -201,6 +214,11 @@ function reconcile_with_existing_env() {
     [[ -z "$DOMAIN_FLAG"     && -n "$EXISTING_DOMAIN"     ]] && DOMAIN="$EXISTING_DOMAIN"
     [[ -z "$ENGINE_REF_FLAG" && -n "$EXISTING_ENGINE_REF" ]] && ENGINE_REF="$EXISTING_ENGINE_REF"
     [[ -z "$REGISTRY_FLAG"   && "$EXISTING_REGISTRY_SET" == "1" ]] && REGISTRY_VALUE="$EXISTING_REGISTRY"
+    # CLIENT names the FIRST client surface's directory under clients/. It is
+    # derived (<product>-client) on a first stamp, but a product may rename that
+    # surface (or point CLIENT at a different one of its several clients), so a
+    # value already in product.env always wins on a re-run.
+    [[ -n "$EXISTING_CLIENT" ]] && CLIENT="$EXISTING_CLIENT"
     return 0
 }
 
@@ -296,14 +314,19 @@ function sed_token_program() {
 }
 
 # is_skipped <relpath> -- true if the path is an operational file/dir init must
-# not substitute.
+# not substitute. CAP_SKIP_PATHS entries are GLOB patterns; the right-hand side
+# of `==` is deliberately UNQUOTED so `clients/*/Makefile` matches whatever a
+# client surface is called (the plural clients/ layout means the per-client
+# operational paths are not literals any more).
 function is_skipped() {
     local rel="$1" p
     for p in "${CAP_SKIP_PATHS[@]}"; do
         if [[ "$p" == */ ]]; then
-            [[ "$rel" == "$p"* ]] && return 0
+            # shellcheck disable=SC2053  # glob match intended
+            [[ "$rel" == $p* ]] && return 0
         else
-            [[ "$rel" == "$p" ]] && return 0
+            # shellcheck disable=SC2053  # glob match intended
+            [[ "$rel" == $p ]] && return 0
         fi
     done
     return 1
@@ -322,6 +345,7 @@ function write_product_env() {
         printf 'DOMAIN=%s\n' "$DOMAIN"
         printf 'ENGINE_REF=%s\n' "$RESOLVED_ENGINE_REF"
         printf 'REGISTRY=%s\n' "$REGISTRY_VALUE"
+        printf 'CLIENT=%s\n' "$CLIENT"
     } > "$tmp"
     if [[ -f "$target" ]] && cmp -s "$tmp" "$target"; then
         rm -f "$tmp"
@@ -332,13 +356,24 @@ function write_product_env() {
     fi
 }
 
-# rename_token_paths -- rename the token-bearing paths (the dsl domain dir + the
-# argocd app files). Idempotent: a already-renamed path is left as-is.
+# rename_token_paths -- rename the token-bearing paths (the dsl domain dir, the
+# first client surface's dir, the argocd app files). Idempotent: an
+# already-renamed path is left as-is.
 function rename_token_paths() {
     # dsl/__PRODUCT__/ -> dsl/<product>/
     if [[ -d "$ROOT/dsl/__PRODUCT__" ]]; then
         mv "$ROOT/dsl/__PRODUCT__" "$ROOT/dsl/$PRODUCT"
         cap_step "renamed dsl/__PRODUCT__/ -> dsl/$PRODUCT/"
+        cap_changed
+    fi
+    # clients/__PRODUCT__-client/ -> clients/<client>/. clients/ is PLURAL: a
+    # product ships as many surfaces as it needs (an SPA, a landing page, a
+    # game). The template carries ONE, and its directory name is also its npm
+    # package name and its image name -- that one-name rule is what lets the
+    # deploy + release plumbing find a surface without a per-product lookup.
+    if [[ -d "$ROOT/clients/__PRODUCT__-client" ]]; then
+        mv "$ROOT/clients/__PRODUCT__-client" "$ROOT/clients/$CLIENT"
+        cap_step "renamed clients/__PRODUCT__-client/ -> clients/$CLIENT/"
         cap_changed
     fi
     # deploy/argocd/apps/__PRODUCT__-{staging,prod}.yaml
@@ -418,13 +453,19 @@ function replace_readme() {
     tmp="$(mktemp)"
     {
         printf '# %s\n\n' "$PRODUCT"
-        printf 'A **memQL product** -- a DSL bundle + a client running on the shared,\n'
-        printf 'product-agnostic [memQL engine](https://github.com/znasllc-io/memql). Stamped\n'
-        printf 'from the [memql-project](https://github.com/znasllc-io/memql-project) template.\n\n'
+        printf 'A **memQL product** -- a DSL bundle plus one or more client surfaces, running\n'
+        printf 'on the shared, product-agnostic\n'
+        printf '[memQL engine](https://github.com/znasllc-io/memql). Stamped from the\n'
+        printf '[memql-project](https://github.com/znasllc-io/memql-project) template.\n\n'
         printf '## Layout\n\n'
         printf -- '- `dsl/%s/` -- the product DSL (.memql): concepts, queries, mutations,\n' "$PRODUCT"
         printf '  shapes, tools, automations. The whole product surface; no product Go.\n'
-        printf -- '- `client/` -- the product frontend (Vite + React + TS SPA).\n'
+        printf -- '- `clients/` -- the product frontends, PLURAL. One directory per surface;\n'
+        printf '  a directory name is also its npm package name and its image name.\n'
+        printf -- '  - `clients/%s/` -- the surface stamped from the template (Vite + React\n' "$CLIENT"
+        printf '    + TS SPA), recorded as `CLIENT` in `product.env`.\n'
+        printf -- '  - add more alongside it (`clients/%s-landing/`, ...) -- see\n' "$PRODUCT"
+        printf '    `ONBOARDING.md` "Adding a second client surface".\n'
         printf -- '- `deploy/` -- the DSL-bundle image (`Dockerfile.bundle`) + kustomize\n'
         printf '  overlays (local / staging / prod) + the ArgoCD project/app manifests.\n'
         printf -- '- `product.env` -- product identity every operational file reads.\n\n'
@@ -436,7 +477,7 @@ function replace_readme() {
         printf 'make dev       # rebuild the DSL bundle and re-mount it on the bff\n'
         printf 'make status    # product Application + mesh status\n'
         printf 'make down      # tear down\n'
-        printf 'cd client && make dev   # the SPA HMR inner loop (Vite on :8080)\n'
+        printf 'cd clients/%s && make dev   # the SPA HMR inner loop (Vite on :8080)\n' "$CLIENT"
         printf '```\n\n'
         printf 'The front door serves https://identity.%s, https://bff.%s, https://app.%s.\n\n' "$DOMAIN" "$DOMAIN" "$DOMAIN"
         printf '## Staying in sync with the template\n\n'
@@ -450,7 +491,8 @@ function replace_readme() {
         printf '```\n\n'
         printf 'The first `--allow-unrelated-histories` merge pulls the template'"'"'s\n'
         printf 'PRE-STAMP tree, so it resurrects what init.sh pruned/renamed: the\n'
-        printf 'template placeholder DSL directory (next to your `dsl/%s/`),\n' "$PRODUCT"
+        printf 'template placeholder DSL directory (next to your `dsl/%s/`), the\n' "$PRODUCT"
+        printf 'template placeholder client directory (next to your `clients/%s/`),\n' "$CLIENT"
         printf '`template-ci.yml`, `product.env.example`, and the placeholder ArgoCD\n'
         printf 'app files under `deploy/argocd/apps/`. Re-prune and commit them after\n'
         printf 'the first sync (runtime is safe meanwhile -- the engine skips\n'
@@ -490,9 +532,10 @@ function print_dry_run_plan() {
     cap_info "domain:       $DOMAIN"
     cap_info "engine ref:   $RESOLVED_ENGINE_REF"
     cap_info "registry:     ${REGISTRY_VALUE:-<empty: local-only>}"
+    cap_info "client:       clients/$CLIENT (the first client surface; clients/ is plural)"
     cap_info "would write:  product.env"
-    cap_info "would rename: dsl/__PRODUCT__/ -> dsl/$PRODUCT/, deploy/argocd/apps/__PRODUCT__-*.yaml"
-    cap_info "would stamp:  dsl/, deploy/, client/ (src+manifests+docs), ONBOARDING.md, CLAUDE.md"
+    cap_info "would rename: dsl/__PRODUCT__/ -> dsl/$PRODUCT/, clients/__PRODUCT__-client/ -> clients/$CLIENT/, deploy/argocd/apps/__PRODUCT__-*.yaml"
+    cap_info "would stamp:  dsl/, deploy/, clients/ (src+manifests+docs), ONBOARDING.md, CLAUDE.md"
     cap_info "would prune:  .github/workflows/template-ci.yml, product.env.example; replace README.md with a product stub"
     if [[ -n "$SKIP_CLONES" ]]; then
         cap_info "would clone:  (skipped -- --skip-clones)"
@@ -507,6 +550,7 @@ function emit_result() {
     cap_result_set domain "$DOMAIN"
     cap_result_set engineRef "$RESOLVED_ENGINE_REF"
     cap_result_set registry "$REGISTRY_VALUE"
+    cap_result_set client "$CLIENT"
     cap_result_set productRoot "$ROOT"
     cap_result_set workspace "$PARENT"
     cap_result_set_raw skipClones "$( [[ -n "$SKIP_CLONES" ]] && echo true || echo false )"
@@ -535,6 +579,11 @@ function main() {
 
     validate_params
     require_prerequisites
+    # The first client surface's directory under clients/ (also its npm package
+    # name and its image name). Derived here; reconcile_with_existing_env lets a
+    # value already in product.env win, so a product that renamed or re-pointed
+    # its primary surface keeps it across a re-stamp.
+    CLIENT="${PRODUCT}-client"
     # Guard the re-run cases BEFORE resolving/validating/mutating (all exit 3, no
     # mutation): (1) product.env deleted on an already-stamped tree, and (2)
     # product.env present but the requested identity disagrees. Reconcile also

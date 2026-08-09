@@ -1,8 +1,14 @@
 name: publish-images
 
-# Build the product's two images -- the DSL bundle (deploy/Dockerfile.bundle) and
-# the SPA (client/Dockerfile) -- and push them to the product registry,
-# digest-pinned, so a staging/prod overlay can be pinned by @sha256.
+# Build the product's images -- the DSL bundle (deploy/Dockerfile.bundle) and the
+# PRIMARY client surface (clients/$CLIENT/Dockerfile) -- and push them to the
+# product registry, digest-pinned, so a staging/prod overlay can be pinned by
+# @sha256.
+#
+# clients/ is PLURAL. This workflow publishes the surface product.env names as
+# CLIENT, which is what the release lockfile + promote flow pin today. A product
+# that ships a SECOND surface publishes it alongside (add a build_one call and a
+# lockfile component) -- see deploy/releases/README.md.
 #
 # GENERIC / TEMPLATE-OWNED: this workflow bakes NO product name. It reads product
 # identity from product.env (PRODUCT, PRODUCT_ORG, REGISTRY) at run time, so it
@@ -37,11 +43,11 @@ on:
         type: boolean
         default: true
       vite_memql_http_url:
-        description: "SPA build arg VITE_MEMQL_HTTP_URL -- the bff front door the browser talks to. Leave blank to keep the Dockerfile default (starter/sim). See the SPA build-time caveat in deploy/releases/README.md."
+        description: "Client build arg VITE_MEMQL_HTTP_URL -- the bff front door the browser talks to. Leave blank to keep the Dockerfile default (starter/sim). See the client build-time caveat in deploy/releases/README.md."
         required: false
         type: string
       vite_identity_base_url:
-        description: "SPA build arg VITE_IDENTITY_BASE_URL -- the magic-link + JWKS host. Leave blank to keep the Dockerfile default. Baking these makes the client digest env-specific (see caveat)."
+        description: "Client build arg VITE_IDENTITY_BASE_URL -- the magic-link + JWKS host. Leave blank to keep the Dockerfile default. Baking these makes the client digest env-specific (see caveat)."
         required: false
         type: string
 
@@ -75,17 +81,23 @@ jobs:
           . ./product.env
           : "${PRODUCT:?PRODUCT empty in product.env}"
           : "${PRODUCT_ORG:?PRODUCT_ORG empty in product.env}"
+          # CLIENT names the primary client surface's directory under clients/
+          # (also its npm package name and its image name). Older product.env
+          # files predate the key; derive the template's stamped default.
+          client="${CLIENT:-${PRODUCT}-client}"
+          [ -d "clients/$client" ] || { echo "ERROR: client surface not found at clients/$client -- CLIENT in product.env must name a directory under clients/" >&2; exit 1; }
           registry="${IN_REGISTRY:-${REGISTRY:-}}"
           [ -n "$registry" ] || { echo "ERROR: no registry -- set REGISTRY in product.env or pass the 'registry' input" >&2; exit 1; }
           tag="${IN_TAG:-}"
           [ -n "$tag" ] || tag="$(git rev-parse --short=12 HEAD)"
           {
             echo "product=$PRODUCT"
+            echo "client=$client"
             echo "registry=$registry"
             echo "registry_host=${registry%%/*}"
             echo "tag=$tag"
           } >> "$GITHUB_OUTPUT"
-          echo "resolved: registry=$registry product=$PRODUCT tag=$tag" >&2
+          echo "resolved: registry=$registry product=$PRODUCT client=$client tag=$tag" >&2
 
       - name: registry login
         if: ${{ inputs.push }}
@@ -100,16 +112,18 @@ jobs:
         env:
           REGISTRY: ${{ steps.cfg.outputs.registry }}
           PRODUCT: ${{ steps.cfg.outputs.product }}
+          CLIENT: ${{ steps.cfg.outputs.client }}
           TAG: ${{ steps.cfg.outputs.tag }}
           PUSH: ${{ inputs.push }}
-          # For the SPA image's optional private-scope npm install (@<org> SDKs).
+          # For the client image's optional private-scope npm install (@<org> SDKs).
           # The starter is self-contained (public deps only), so this is unused
           # today; the Dockerfile marks the BuildKit secret required=false.
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # SPA build-time envelope (client/Dockerfile's two documented VITE_ ARGs).
+          # Client build-time envelope (the surface Dockerfile's two documented
+          # VITE_ ARGs).
           # Empty -> the Dockerfile default (starter/sim single-DOMAIN fallback).
           # NON-empty -> a correctly-configured but ENV-SPECIFIC client digest;
-          # see the SPA build-time caveat in deploy/releases/README.md before
+          # see the client build-time caveat in deploy/releases/README.md before
           # relying on the exact-bytes staging->prod promote for the client image.
           VITE_MEMQL_HTTP_URL: ${{ inputs.vite_memql_http_url }}
           VITE_IDENTITY_BASE_URL: ${{ inputs.vite_identity_base_url }}
@@ -131,36 +145,40 @@ jobs:
           # node. Pinning keeps the pushed digest's arch honest regardless of runner.
           PLATFORM="linux/amd64"
 
-          # build_one <output-key> <image-suffix> <dockerfile> <context> [extra docker build args...]
+          # build_one <output-key> <image-name> <dockerfile> <context> [extra docker build args...]
+          # <image-name> is the repository name inside $REGISTRY. For a client
+          # surface that name IS its directory name under clients/ (the one-name
+          # rule), so nothing has to be reassembled from parts.
           build_one() {
-            local key="$1" suffix="$2" dockerfile="$3" context="$4"; shift 4
-            local ref="$REGISTRY/$PRODUCT-$suffix"
+            local key="$1" name="$2" dockerfile="$3" context="$4"; shift 4
+            local ref="$REGISTRY/$name"
             echo "==> build $ref:$TAG (--platform $PLATFORM -f $dockerfile $context)" >&2
             docker build --platform="$PLATFORM" -f "$dockerfile" -t "$ref:$TAG" "$@" "$context" >&2
             printf '%s_image=%s\n' "$key" "$ref" >> "$GITHUB_OUTPUT"
             if [ "$PUSH" != "true" ]; then
-              echo "build-only (push disabled): skipping push + digest for $suffix" >&2
+              echo "build-only (push disabled): skipping push + digest for $name" >&2
               printf '%s_digest=\n' "$key" >> "$GITHUB_OUTPUT"
               return 0
             fi
             docker push "$ref:$TAG" >&2
             local digest; digest="$(push_digest "$ref")"
             [ -n "$digest" ] || { echo "ERROR: could not resolve pushed digest for $ref:$TAG" >&2; exit 1; }
-            echo "    $suffix -> $digest" >&2
+            echo "    $name -> $digest" >&2
             printf '%s_digest=%s\n' "$key" "$digest" >> "$GITHUB_OUTPUT"
           }
 
           # The DSL bundle: data-only image, build context is the repo root so
           # `COPY dsl /bundle` resolves (deploy/Dockerfile.bundle).
-          build_one bundle dsl-bundle deploy/Dockerfile.bundle .
+          build_one bundle "$PRODUCT-dsl-bundle" deploy/Dockerfile.bundle .
 
-          # The SPA: BuildKit secret carries NODE_AUTH_TOKEN (optional), context
-          # is client/. The two documented VITE_ build args are fed from the
-          # dispatch inputs; when both are blank the Dockerfile defaults hold (the
-          # starter SPA runs on sim data until the live memql seam is wired), so
-          # this is a no-op for the starter. Passing empty --build-arg values is
-          # safe: the ARGs default to empty in client/Dockerfile.
-          build_one client client client/Dockerfile client \
+          # The primary client surface: BuildKit secret carries NODE_AUTH_TOKEN
+          # (optional), context is clients/$CLIENT/. The two documented VITE_
+          # build args are fed from the dispatch inputs; when both are blank the
+          # Dockerfile defaults hold (the starter surface runs on sim data until
+          # the live memql seam is wired), so this is a no-op for the starter.
+          # Passing empty --build-arg values is safe: the ARGs default to empty
+          # in the surface's Dockerfile.
+          build_one client "$CLIENT" "clients/$CLIENT/Dockerfile" "clients/$CLIENT" \
             --secret id=node_auth_token,env=NODE_AUTH_TOKEN \
             --build-arg VITE_MEMQL_HTTP_URL="$VITE_MEMQL_HTTP_URL" \
             --build-arg VITE_IDENTITY_BASE_URL="$VITE_IDENTITY_BASE_URL"

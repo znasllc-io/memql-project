@@ -14,13 +14,13 @@ concurrency:
 
 permissions:
   contents: read
-  # The client lane may install org-scoped GitHub Packages (the memQL SDK)
+  # The clients lane may install org-scoped GitHub Packages (the memQL SDK)
   # once a product wires it; read access costs nothing for the self-contained
   # starter and unblocks every stamped instance.
   packages: read
 
 # PRODUCT CI: the lanes that ship to every stamped instance and also pass
-# in-template against the starter payload. Path-filtered (client/deploy/dsl),
+# in-template against the starter payload. Path-filtered (clients/deploy/dsl),
 # fail-open to running when the diff base is unknown (push / merge_group / first
 # push) so a lane is never falsely skipped.
 #
@@ -32,7 +32,7 @@ jobs:
     name: changes
     runs-on: ubuntu-latest
     outputs:
-      client: ${{ steps.filter.outputs.client }}
+      clients: ${{ steps.filter.outputs.clients }}
       deploy: ${{ steps.filter.outputs.deploy }}
       dsl: ${{ steps.filter.outputs.dsl }}
     steps:
@@ -52,7 +52,7 @@ jobs:
             pull_request) base="$BASE_SHA" ;;
             push)         base="$BEFORE_SHA" ;;
           esac
-          run_all() { echo "client=true" >> "$GITHUB_OUTPUT"; echo "deploy=true" >> "$GITHUB_OUTPUT"; echo "dsl=true" >> "$GITHUB_OUTPUT"; }
+          run_all() { echo "clients=true" >> "$GITHUB_OUTPUT"; echo "deploy=true" >> "$GITHUB_OUTPUT"; echo "dsl=true" >> "$GITHUB_OUTPUT"; }
           if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
             echo "diff base unknown ($EVENT_NAME) -> running all lanes"
             run_all; exit 0
@@ -62,7 +62,7 @@ jobs:
           emit() { if echo "$changed" | grep -qE "$2"; then echo "$1=true" >> "$GITHUB_OUTPUT"; else echo "$1=false" >> "$GITHUB_OUTPUT"; fi; }
           # A change to CI or the stamper re-runs everything (they affect all lanes).
           if echo "$changed" | grep -qE '^\.github/|^scripts/|^product\.env'; then run_all; exit 0; fi
-          emit client '^client/'
+          emit clients '^clients/'
           emit deploy '^deploy/'
           emit dsl    '^dsl/'
 
@@ -74,7 +74,10 @@ jobs:
       - name: shellcheck scripts
         run: |
           shellcheck --version
-          find scripts client/scripts -name '*.sh' -print0 | xargs -0 shellcheck --severity=warning
+          # clients/ is PLURAL: sweep the whole tree of surfaces, not one
+          # hardcoded client path, so a second surface's scripts are covered
+          # the moment it lands.
+          find scripts clients -name '*.sh' -print0 | xargs -0 shellcheck --severity=warning
 
   capability-conformance:
     name: capability-conformance
@@ -128,10 +131,10 @@ jobs:
           after="$(git status --porcelain)"
           [ "$before" = "$after" ] || { echo "dry-run mutated the tree" >&2; exit 1; }
 
-  client:
-    name: client
+  clients:
+    name: clients
     needs: changes
-    if: needs.changes.outputs.client == 'true'
+    if: needs.changes.outputs.clients == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -140,7 +143,7 @@ jobs:
           node-version: '20'
       # The starter shell is SELF-CONTAINED (a thin local memQL client + a local
       # generated concepts module) and installs with zero private SDKs. A
-      # stamped product that adopts the org SDK (client/.npmrc maps the org
+      # stamped product that adopts the org SDK (a surface's .npmrc maps the org
       # scope to GitHub Packages) needs a token at install time, so the lane
       # provides NODE_AUTH_TOKEN unconditionally: the job's GITHUB_TOKEN
       # (packages: read) covers packages linked to the product repo; when the
@@ -149,24 +152,39 @@ jobs:
       # the optional NPM_PACKAGES_READ_TOKEN repo secret (a PAT with
       # read:packages) which takes precedence. The starter never consults the
       # token (no org-scoped deps), so the lane stays green in-template.
-      # The test step runs ONLY when the client defines a `test` script: a
+      # The test step runs ONLY when a surface defines a `test` script: a
       # product that drops in a vitest/jest suite rides it on this lane
       # automatically, while the starter (which ships no test script) skips it
       # gracefully so the lane stays green in-template.
-      - name: npm install + typecheck + build + lint (+ test when defined)
-        working-directory: client
+      # EVERY surface under clients/ rides this lane. clients/ is plural, so the
+      # lane enumerates the tree instead of naming one directory: a product that
+      # adds clients/<product>-landing/ gets it checked with no CI edit.
+      - name: npm install + typecheck + build + lint (+ test when defined), per client surface
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_PACKAGES_READ_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
-          npm install --no-audit --no-fund
-          npm run typecheck
-          npm run build
-          npm run lint
-          if [ "$(jq -r '.scripts.test // empty' package.json)" ]; then
-            npm test
-          else
-            echo "no client test script defined -- skipping npm test"
-          fi
+          set -euo pipefail
+          found=0
+          for d in clients/*/; do
+            [ -f "$d/package.json" ] || continue
+            found=$((found + 1))
+            echo "==> $d"
+            (
+              cd "$d"
+              npm install --no-audit --no-fund
+              npm run typecheck
+              npm run build
+              npm run lint
+              if [ "$(jq -r '.scripts.test // empty' package.json)" ]; then
+                npm test
+              else
+                echo "no test script defined in $d -- skipping npm test"
+              fi
+            )
+          done
+          # A repo whose clients/ holds no npm surface at all is a broken move,
+          # not an empty success: fail rather than pass vacuously.
+          [ "$found" -gt 0 ] || { echo "ERROR: no clients/*/package.json found" >&2; exit 1; }
 
   deploy:
     name: deploy
@@ -184,15 +202,24 @@ jobs:
       - name: digest gate (staging/prod product images pinned by @sha256; local exempt)
         run: |
           set -euo pipefail
+          # PRODUCT images are every rendered image that is NOT an engine image:
+          # the engine's own node images live in the engine registry
+          # (acrmemql.azurecr.io, literal everywhere) and are pinned by TAG to
+          # the engine ref, while everything the product itself builds -- the DSL
+          # bundle AND every surface under clients/ -- must be digest-pinned.
+          # Defining it by exclusion is what makes the gate plural-safe: a second
+          # client surface is covered the day it lands, with no CI edit and no
+          # image-name convention to keep in sync.
+          engine_registry='acrmemql.azurecr.io/'
           for o in staging prod; do
-            # Both product images (the DSL bundle + the client SPA) MUST render
-            # AND every product-image line MUST be digest-pinned. The positive
-            # count assertion (C4) stops the gate passing vacuously if an image
-            # name drifts so the grep matches nothing.
-            imgs="$(grep -E '^\s*(-?\s*)?image:.*(-dsl-bundle|-client)' "/tmp/render-$o.yaml" || true)"
+            # Both kinds of product image (the DSL bundle + at least one client
+            # surface) MUST render AND every product-image line MUST be
+            # digest-pinned. The positive count assertion (C4) stops the gate
+            # passing vacuously if the render drifts so the grep matches nothing.
+            imgs="$(grep -E '^\s*(-?\s*)?image:' "/tmp/render-$o.yaml" | grep -v "$engine_registry" || true)"
             n="$(printf '%s\n' "$imgs" | grep -c . || true)"
             if [ "$n" -lt 2 ]; then
-              echo "ERROR: $o overlay rendered $n product image(s); expected >=2 (the DSL bundle + the client). Image names may have drifted:" >&2
+              echo "ERROR: $o overlay rendered $n product image(s); expected >=2 (the DSL bundle + at least one client surface). Image names may have drifted:" >&2
               printf '%s\n' "$imgs" >&2
               exit 1
             fi
@@ -271,7 +298,7 @@ jobs:
 
   ci-required:
     name: ci-required
-    needs: [changes, shellcheck, capability-conformance, client, deploy, dsl]
+    needs: [changes, shellcheck, capability-conformance, clients, deploy, dsl]
     if: always()
     runs-on: ubuntu-latest
     steps:

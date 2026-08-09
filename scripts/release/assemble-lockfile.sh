@@ -8,6 +8,10 @@
 # digest}: the lockfile pins each product component by @sha256 so an overlay
 # renders the EXACT bytes CI built.
 #
+# clients/ is PLURAL, but the lockfile shape pins ONE client surface today -- the
+# one product.env names as CLIENT (its image name IS its directory name). A
+# second surface needs its own component; see deploy/releases/README.md.
+#
 # GENERIC / TEMPLATE-OWNED: reads product identity from product.env (PRODUCT,
 # REGISTRY, ENGINE_REF); no product name is baked in. A second product wants
 # this unchanged. Lockfiles are IMMUTABLE -- a new release gets a new file under
@@ -22,7 +26,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/capability.sh"
 cap_init "release.assemble-lockfile" "Write deploy/releases/<release>.yaml pinning the product images by digest."
 cap_spec_param "release"       "release id / immutable tag (required)"
 cap_spec_param "bundle-digest" "sha256:<64hex> digest of the DSL-bundle image (required)"
-cap_spec_param "client-digest" "sha256:<64hex> digest of the client SPA image (required)"
+cap_spec_param "client-digest" "sha256:<64hex> digest of the primary client surface's image (required)"
 cap_spec_param "engine-ref"    "engine ref this release ships against (default: ENGINE_REF from product.env)"
 cap_spec_param "registry"      "registry host/path (default: REGISTRY from product.env)"
 cap_spec_param "out"           "output path (default: deploy/releases/<release>.yaml)"
@@ -77,7 +81,7 @@ function main() {
         printf '    image: "%s/%s-dsl-bundle"\n' "$registry" "$PRODUCT"
         printf '    digest: "%s"\n' "$bundle"
         printf '  client:\n'
-        printf '    image: "%s/%s-client"\n' "$registry" "$PRODUCT"
+        printf '    image: "%s/%s"\n' "$registry" "${CLIENT:-${PRODUCT}-client}"
         printf '    digest: "%s"\n' "$client"
     } > "$tmp"
 

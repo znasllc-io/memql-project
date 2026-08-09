@@ -61,11 +61,20 @@ function check_overlay() {
         rm -f "$render_err"; return 1
     fi
     rm -f "$render_err"
-    local comp want got
+    local comp want got img
     for comp in dsl-bundle client; do
         want="$(lock_comp "$lf" "$comp" digest)"
-        # Rendered line: image: <registry>/<product>-<comp>@sha256:...
-        got="$(printf '%s\n' "$rendered" | grep -oE "[^ ]*-${comp}@sha256:[0-9a-f]{64}" | head -1 | sed 's/.*@//')"
+        img="$(lock_comp "$lf" "$comp" image)"
+        if [ -z "$img" ]; then
+            # Without a repository to match on, an empty grep pattern would match
+            # EVERY rendered image and pass vacuously. Fail instead.
+            cap_error "COHERENCE-FAIL: lockfile has no image for $comp -- cannot check overlay $env"; rc=1; continue
+        fi
+        # Match the lockfile's OWN image repository, not a "-<comp>" name
+        # convention: clients/ is plural and a surface's image name is its
+        # directory name, which need not end in "-client". -F because a
+        # repository contains regex metacharacters (dots, slashes).
+        got="$(printf '%s\n' "$rendered" | grep -F "${img}@sha256:" | head -1 | sed 's/.*@//' | tr -d '[:space:]')"
         if [ -z "$got" ]; then
             cap_error "COHERENCE-FAIL: overlay $env has no digest-pinned $comp image"; rc=1; continue
         fi

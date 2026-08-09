@@ -2,10 +2,10 @@
 # deploy/argocd/apps/__PRODUCT__-prod.yaml. PROD IS A STARTER PLACEHOLDER kept
 # coherent with staging.
 #
-# Owns ONLY product resources (bff head + SPA + public entry + runtime DSL
-# bundle); the engine mesh is the separate engine Application. OAuth client
-# registration is engine-side (see the staging overlay comment). The product
-# image digests are all-zeros and FAIL CLOSED.
+# Owns ONLY product resources (bff head + client surfaces + public entry +
+# runtime DSL bundle); the engine mesh is the separate engine Application. OAuth
+# client registration is engine-side (see the staging overlay comment). The
+# product image digests are all-zeros and FAIL CLOSED.
 #
 # ACTIVATION CHECKLIST (same as staging, with prod values) -- complete before
 # pointing an ArgoCD Application here:

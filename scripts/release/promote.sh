@@ -16,6 +16,10 @@
 # overlay's kustomization.yaml (comment-preserving; the engine bff image, pinned
 # by tag, is left untouched), then re-asserts the overlay matches the lockfile.
 #
+# clients/ is PLURAL, but a release lockfile pins ONE client surface today: the
+# one product.env names as CLIENT. A product that ships a second surface pins it
+# by hand (or extends the lockfile shape) -- see deploy/releases/README.md.
+#
 # GENERIC / TEMPLATE-OWNED. Capability script:
 # docs/internal/design/capability-script-contract.md
 set -euo pipefail
@@ -76,10 +80,13 @@ function main() {
     client_digest="$(lock_comp "$lf" client digest)"
 
     # kustomize `name:` keys of the two product images in the overlay: the DSL
-    # bundle keeps the engine placeholder name (memql-dsl-bundle); the client is
-    # <product>-client. Engine bff (memql-bff) is deliberately NOT matched.
-    local bundle_name="memql-dsl-bundle" client_name="${PRODUCT}-client"
-    local bundle_new="$registry/${PRODUCT}-dsl-bundle" client_new="$registry/${PRODUCT}-client"
+    # bundle keeps the engine placeholder name (memql-dsl-bundle); the client
+    # surface's key IS its directory name under clients/ (the one-name rule),
+    # which product.env records as CLIENT. Engine bff (memql-bff) is deliberately
+    # NOT matched.
+    local client_key="${CLIENT:-${PRODUCT}-client}"
+    local bundle_name="memql-dsl-bundle" client_name="$client_key"
+    local bundle_new="$registry/${PRODUCT}-dsl-bundle" client_new="$registry/$client_key"
 
     local tmp; tmp="$(mktemp)"
     # Rewrite into $tmp and count each substitution. awk prints the rewritten
