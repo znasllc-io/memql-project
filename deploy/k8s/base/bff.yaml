@@ -106,6 +106,32 @@ spec:
             # identity-config.yaml patch -- the same per-environment patch point as
             # the issuer above (see the overlay activation checklist).
             - { name: SERVER_ALLOWED_ORIGINS, value: "https://app.__DOMAIN__" }
+            # The memQL Portal is DELIBERATELY NOT SERVED by the product bff.
+            #
+            # The portal is the PLATFORM's operations console, not a product
+            # surface. Operators reach it through the engine Application's own
+            # neutral bff, whose engine-bff component sets
+            # MEMQL_PORTAL_DIST=/app/portal. Leaving it unset here is a choice,
+            # not an oversight.
+            #
+            # To serve it from THIS head anyway, two things must both be true:
+            #   1. the image actually carries the bundle. It is never
+            #      //go:embed'ed, and the engine Dockerfile's PORTAL_DIST_STAGE
+            #      defaults to `portal-skip` (an empty directory), so /app/portal
+            #      is EMPTY unless the image was built with
+            #      `--build-arg PORTAL_DIST_STAGE=portal-build`. A missing bundle
+            #      does not fail boot -- the handler answers 404 with an
+            #      actionable message, which is the confusing half-state to avoid.
+            #   2. this env var names that directory:
+            #        - { name: MEMQL_PORTAL_DIST, value: "/app/portal" }
+            #
+            # Before enabling it, weigh the exposure: GET /portal/* is in the
+            # engine's PUBLIC path set (static bytes, identical for every visitor
+            # -- a browser must fetch the bundle before any application code
+            # exists to authenticate), and this head is published to the internet
+            # by the staging/prod entry (app.DOMAIN + bff.DOMAIN). The DATA the
+            # portal reads stays gated on the /memql/ws stream it then dials, but
+            # the console itself becomes publicly reachable.
             # Shared DB -- migrations run once on the engine identity node.
             - { name: MEMORY_NODES_DATABASE_MIGRATE_ON_START, value: "false" }
           volumeMounts:
