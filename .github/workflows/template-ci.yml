@@ -87,7 +87,7 @@ jobs:
       - name: zero leftover tokens (zero tolerance)
         # Only the ROOT scripts/ is exempt: the stamper (scripts/init.sh)
         # legitimately references the token literals it substitutes. A blanket
-        # --exclude-dir=scripts also blinds the check to client/scripts/ (C3), so
+        # --exclude-dir=scripts also blinds the check to clients/*/scripts/ (C3), so
         # instead grep the whole tree and drop only matches under ./scripts/.
         # Everything init is meant to stamp (dsl/deploy/clients/docs) must be
         # token-free, __PRODUCT_ID__ included.

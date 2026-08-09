@@ -393,7 +393,7 @@ function rename_token_paths() {
 # SCOPE: walks ONLY the template-owned CAP_STAMP_PATHS, never the whole repo root,
 # so a product repo's own content (its app, design assets) keeps any __TOKEN__-
 # looking literals verbatim. is_skipped still runs as a secondary guard for the
-# operational files nested inside those paths (e.g. client/scripts/).
+# operational files nested inside those paths (e.g. clients/*/scripts/).
 function substitute_tree() {
     local prog rel tmp p roots=()
     prog="$(sed_token_program)"

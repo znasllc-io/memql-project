@@ -2,9 +2,9 @@
 
 How this repo fits together, how it composes with the shared engine, and how to
 make changes without breaking CI. __PRODUCT__ is a **single-repo memQL product**:
-a DSL bundle + a client running on the product-agnostic
-[memQL engine](https://github.com/znasllc-io/memql). No carrier repo, no product
-`go.work`, no product Go in the common case.
+a DSL bundle plus one or more **client surfaces**, running on the
+product-agnostic [memQL engine](https://github.com/znasllc-io/memql). No carrier
+repo, no product `go.work`, no product Go in the common case.
 
 ## The workspace
 
@@ -13,14 +13,14 @@ clones the engine + cockpit as siblings of this repo:
 
 ```
 <workspace>/
-├── __PRODUCT__/          THIS repo -- the whole product (dsl/ + client/ + deploy/)
+├── __PRODUCT__/          THIS repo -- the whole product (dsl/ + clients/ + deploy/)
 ├── memql/                the shared engine (Go + MemQL DSL); product-agnostic, read-only for product work
 └── memql-cockpit/        terminal-native IDE + ops console for clusters
 ```
 
 | Repo | Remote | Role |
 |---|---|---|
-| `__PRODUCT__` | `__PRODUCT_ORG__/__PRODUCT__` | This product: DSL (`dsl/__PRODUCT__/`), client SPA (`client/`), deploy estate (`deploy/`). |
+| `__PRODUCT__` | `__PRODUCT_ORG__/__PRODUCT__` | This product: DSL (`dsl/__PRODUCT__/`), client surfaces (`clients/`), deploy estate (`deploy/`). |
 | `memql` | `znasllc-io/memql` | The engine: memory graph DB, AI, cluster nodes, the SDK generator + runtime core. Never edit it for product work. |
 | `memql-cockpit` | `znasllc-io/memql-cockpit` | Terminal IDE / ops console; also the worker runtime. |
 
@@ -39,7 +39,7 @@ Two mechanisms, both requiring **zero engine edits**:
    credential, and it would couple revisions). The **engine** Application
    (`memql-local`) owns the mesh; **this repo's** Application (`__PRODUCT__-local`)
    owns the bff head (`bff-__PRODUCT__`, labelled `memql/product-dsl=true`), the
-   SPA, and the front door. The contract:
+   client surfaces under `clients/`, and the front door. The contract:
    `memql/docs/public/operate/downstream-stacks.md`.
 
 ## Local setup
@@ -49,13 +49,13 @@ Node >= 20, and the sibling `../memql` checkout (init.sh clones it).
 
 ```bash
 # THE blessed run path: k3d + ArgoCD, staging parity.
-make up          # engine bring-up + build/import the DSL bundle + SPA + register the product App
+make up          # engine bring-up + build/import the DSL bundle + the primary client + register the product App
 make dev         # rebuild the DSL bundle and re-mount it on the bff (inner loop)
 make status      # product Application + mesh litmus (unique MEMQL_NODE_ID per pod)
 make down        # tear down the whole cluster
 
-# The SPA HMR inner loop (attached; localhost:8080, /memql proxied to the bff):
-cd client && npm install && make dev
+# A surface's HMR inner loop (attached; localhost:8080, /memql proxied to the bff):
+cd clients/__PRODUCT__-client && npm install && make dev
 ```
 
 The front door serves `https://identity.__DOMAIN__`, `https://bff.__DOMAIN__`,
@@ -67,8 +67,9 @@ across products, but it `-include`s an optional, product-OWNED `./product.mk` an
 calls two no-op hooks -- `product-up` (during `make up`, after the SPA image is
 imported and before the product Application is registered) and `product-dev`
 (during `make dev`). A product with a genuinely product-specific LOCAL concern --
-extra images to build+import (e.g. simulators standing in for external systems),
-an extra local placement step -- adds it there with double-colon rules
+a SECOND client surface to build+import, extra images (e.g. simulators standing
+in for external systems), an extra local placement step -- adds it there with
+double-colon rules
 (`product-up:: my-extra-images`). `product.mk` is git-tracked by the PRODUCT and
 never template-synced, so it stays put across `git merge template/main`. Whether
 the extras are scheduled is the LOCAL overlay's call, so staging/prod stay
@@ -104,14 +105,51 @@ procedural kinds (query/mutation/logic/automation/spec/trait). It does NOT
 resolve executor names or validate builtin/tool bodies -- a `make up` boot is the
 full check.
 
+## The client surfaces (`clients/` is plural)
+
+A client is anything a person or another system points at the cluster: a landing
+page, an SPA, a mobile shell, a kiosk, a game. One product routinely ships
+several, so each gets its own directory under `clients/`. The template stamps
+exactly one, `clients/__PRODUCT__-client/`, and `product.env` records it as
+`CLIENT` -- that is the seam the root Makefile, `publish-images.yml` and
+`promote.sh` resolve the PRIMARY surface through.
+
+**The one rule.** A surface's **directory name** is also its **npm package
+name**, its **image name** and its **k8s workload name**. The shared
+`clients/*/Makefile` and `clients/*/scripts/dev/build-image.sh` derive what to
+build and what to roll from their own directory, so they stay byte-identical
+across surfaces and across products.
+
+### Adding a second surface
+
+1. `clients/__PRODUCT__-landing/` with a `package.json` named
+   `__PRODUCT__-landing`, its own `Dockerfile`, and a copy of the stamped
+   surface's `Makefile` + `scripts/dev/build-image.sh` (both name-agnostic).
+2. A Deployment + Service in `deploy/k8s/base/` (copy `app.yaml` and rename), an
+   `images:` entry in each overlay, and a route on the front door
+   (`overlays/local/front-door.yaml`) / public entry (staging, prod).
+3. Local build+import via the `product-up` hook in your own `product.mk`:
+
+   ```makefile
+   product-up:: landing-image
+   landing-image:
+   	$(MAKE) -C clients/$(PRODUCT)-landing image CLUSTER=$(CLUSTER)
+   ```
+
+CI needs no edit -- the `clients` lane, the shellcheck sweep and the staging/prod
+digest gate all enumerate `clients/*/` rather than naming a directory. The
+**release lockfile does**: it pins one `client` component (the `CLIENT` surface),
+so a second surface's digest is pinned by hand until the lockfile shape grows a
+component per surface. See `deploy/releases/README.md`.
+
 ## The SDK (client typing)
 
 The production SDK is **`@__PRODUCT_ORG__/__PRODUCT__-sdk`** (GitHub Packages),
 generated by the engine's `sdk-gen` over `core DSL ∪ dsl/__PRODUCT__/`. At stamp
-time it does not exist, so the client shell is **self-contained**: a thin local
-memQL client + a hand-seeded generated concepts module, so
+time it does not exist, so the stamped surface is **self-contained**: a thin
+local memQL client + a hand-seeded generated concepts module, so
 `npm install && npm run build` pass immediately with no token. Wire the published
-SDK later -- see `client/README.md` "SDK resolution".
+SDK later -- see `clients/__PRODUCT__-client/README.md` "SDK resolution".
 
 ## Change routing (the important part)
 
@@ -139,7 +177,9 @@ git merge template/main --allow-unrelated-histories   # first time only
 template's *pre-stamp* tree, which RESURRECTS everything `init.sh` renamed or
 pruned: the template's **placeholder DSL directory** (the template ships `dsl/`
 under its product-token name -- `git status` shows it next to your real
-`dsl/__PRODUCT__/`), `.github/workflows/template-ci.yml`, `product.env.example`,
+`dsl/__PRODUCT__/`), the template's **placeholder client directory** under
+`clients/` (next to your real `clients/__PRODUCT__-client/`),
+`.github/workflows/template-ci.yml`, `product.env.example`,
 and the template's **placeholder ArgoCD app manifests** under
 `deploy/argocd/apps/` (the two `*-staging.yaml` / `*-prod.yaml` files under the
 token name, alongside your stamped `__PRODUCT__-staging.yaml` /
@@ -150,6 +190,7 @@ stamped paths) and commit:
 git status                                     # lists the resurrected pre-stamp artifacts
 git rm .github/workflows/template-ci.yml product.env.example
 git rm -r <the resurrected placeholder DSL dir>          # NOT your dsl/__PRODUCT__/
+git rm -r <the resurrected placeholder clients/ dir>    # NOT your clients/__PRODUCT__-client/
 git rm <the resurrected placeholder deploy/argocd/apps/*.yaml files>
 git commit -m "chore: re-prune template artifacts after first template sync"
 ```
@@ -160,7 +201,7 @@ around is confusing. Later syncs are ordinary merges (no
 `--allow-unrelated-histories`); expect **modify/delete conflicts** on those same
 paths -- resolve them by keeping them deleted (`git rm` the path).
 
-Product-owned files (DSL, manifests, docs, client source) are stamped and will
+Product-owned files (DSL, manifests, docs, client sources) are stamped and will
 diverge -- that is expected; keep the plumbing byte-identical.
 
 ## Conventions
@@ -189,7 +230,7 @@ diverge -- that is expected; keep the plumbing byte-identical.
 ## Where to dig deeper
 
 - `CLAUDE.md` -- this repo's agent guide.
-- `client/CLAUDE.md` -- SPA architecture + the bare-ids contract.
+- `clients/__PRODUCT__-client/CLAUDE.md` -- SPA architecture + the bare-ids contract.
 - `memql/docs/public/operate/downstream-stacks.md` -- the downstream contract.
 - `memql/docs/public/build/building-a-pack.md` + `docs/public/language/authoring-rules.md`
   -- the DSL authoring contract.

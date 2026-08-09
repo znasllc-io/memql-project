@@ -1,8 +1,18 @@
 # Release lockfiles
 
 Each `deploy/releases/<release>.yaml` pins ONE product release: the two product
-images (the DSL bundle + the client SPA) by `@sha256` digest, plus the engine
-ref the release ships against. A release is the immutable unit of promotion.
+images (the DSL bundle + the primary client surface) by `@sha256` digest, plus
+the engine ref the release ships against. A release is the immutable unit of
+promotion.
+
+**`clients/` is plural; this lockfile shape is not (yet).** The `client`
+component pins the ONE surface `product.env` names as `CLIENT`. A product that
+ships a second surface publishes and pins that image by hand -- add its
+`build_one` call in `publish-images.yml` and its `images:` entry in the overlay
+-- until the lockfile grows a component per surface. The staging/prod CI digest
+gate already covers every product image (it matches by excluding the engine
+registry, not by name), so an unpinned second surface fails the gate rather than
+shipping floating.
 
 Lockfiles are **immutable** -- a new release gets a new file; never edit one in
 place. Rollback is `git revert` + re-pin, not an in-place digest swap.
@@ -18,7 +28,7 @@ components:
     image: "ghcr.io/<org>/<product>-dsl-bundle"
     digest: "sha256:<64hex>"
   client:
-    image: "ghcr.io/<org>/<product>-client"
+    image: "ghcr.io/<org>/<client>"        # <client> = CLIENT from product.env
     digest: "sha256:<64hex>"
 ```
 
@@ -43,31 +53,31 @@ components:
 The scripts are registry-agnostic and read product identity from `product.env`,
 so this flow is byte-identical across every product stamped from the template.
 
-## SPA build-time configuration caveat (exact-bytes scope)
+## Client build-time configuration caveat (exact-bytes scope)
 
 The exact-bytes promise ("prod runs the same bytes staging ran") holds
 **unconditionally for the DSL bundle** -- it is data-only and carries no
 per-environment configuration.
 
-The **client SPA is different**: `client/Dockerfile` bakes two URLs at build
-time -- `VITE_MEMQL_HTTP_URL` (the bff front door) and `VITE_IDENTITY_BASE_URL`
+The **client surface is different**: `clients/<client>/Dockerfile` bakes two URLs
+at build time -- `VITE_MEMQL_HTTP_URL` (the bff front door) and `VITE_IDENTITY_BASE_URL`
 (the magic-link + JWKS host). `publish-images.yml` exposes them as the optional
 `vite_memql_http_url` / `vite_identity_base_url` dispatch inputs:
 
-- **Left blank (the starter default):** the Dockerfile defaults hold, the SPA
-  is environment-agnostic, and one client digest promotes staging -> prod
+- **Left blank (the starter default):** the Dockerfile defaults hold, the
+  surface is environment-agnostic, and one client digest promotes staging -> prod
   exactly, same as the bundle.
 - **Set to real per-environment URLs:** the client digest is **environment
   specific**. Promoting the same client digest from staging to prod would ship
-  a SPA that talks to the staging backend from prod. In that case do **not**
+  a client that talks to the staging backend from prod. In that case do **not**
   promote the client digest across environments that use different URLs: build
   the client once per environment (dispatch `publish-images.yml` with that
   env's URLs) and pin each overlay to its own client digest. A single release
-  lockfile carries ONE client digest, so genuinely distinct per-env SPA URLs do
-  not fit the one-lockfile-per-release model as-is.
+  lockfile carries ONE client digest, so genuinely distinct per-env client URLs
+  do not fit the one-lockfile-per-release model as-is.
 
 The real fix that restores the unconditional exact-bytes promise for the client
-is **runtime SPA configuration** (serve the URLs from the environment at
+is **runtime client configuration** (serve the URLs from the environment at
 container start instead of baking them at build time), tracked as follow-up.
 Until then, keeping the two URLs environment-agnostic -- or serving both
 environments from the same public hostnames -- is what keeps a single client

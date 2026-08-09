@@ -1,7 +1,7 @@
 # __PRODUCT__ -- DSL-first memQL product (agent guide)
 
-**Type:** a single-repo memQL product = a DSL bundle + a client (no product Go
-in the common case).
+**Type:** a single-repo memQL product = a DSL bundle plus one or more client
+surfaces (no product Go in the common case).
 **Runs on:** the shared, product-agnostic memQL engine
 (github.com/znasllc-io/memql), composed at deploy time as TWO ArgoCD
 Applications (engine + this product).
@@ -19,13 +19,20 @@ tracked in memql-project#11; prefer DSL first).
   surface. Reusable capabilities (chat/daily-space/avatar/...) are generic
   engine features you reference from DSL; only genuinely one-of-a-kind Go
   warrants a `bff/` plugin.
-- `client/` -- the product frontend (Vite + React + TS SPA). Bare-ids contract
-  enforced by ESLint. See `client/CLAUDE.md`.
+- `clients/` -- the product's frontends, **PLURAL**. One directory per surface
+  (landing page, SPA, game); a surface's directory name is also its npm package
+  name, its image name and its k8s workload name.
+  - `clients/__PRODUCT__-client/` -- the surface stamped from the template
+    (Vite + React + TS SPA), recorded as `CLIENT` in `product.env`. Bare-ids
+    contract enforced by ESLint. See its `CLAUDE.md`.
+  - Adding another is additive -- see `ONBOARDING.md` "Adding a second
+    surface". Never collapse `clients/` back to a singular directory.
 - `deploy/` -- `Dockerfile.bundle` (the data-only DSL-bundle image) +
   `k8s/{base,components/dsl-bundle,overlays/{local,staging,prod}}` +
   `argocd/` (the product AppProject + staging/prod Applications).
 - `product.env` -- product identity (PRODUCT, PRODUCT_ORG, DOMAIN, ENGINE_REF,
-  REGISTRY). Every operational file reads it.
+  REGISTRY, CLIENT). Every operational file reads it; `CLIENT` names the primary
+  client surface's directory under `clients/`.
 - `Makefile` -- the local stack lifecycle (`make up|dev|status|down`).
 
 ## How it runs (the delivery mechanism)
@@ -41,7 +48,7 @@ concern, not code.
 
 Composition is TWO ArgoCD Applications (never a kustomize remote base): the
 engine Application owns the mesh; this repo's `<product>-local` Application owns
-the bff head + SPA + front door + DSL bundle. See
+the bff head + the client surfaces + front door + DSL bundle. See
 `../memql/docs/public/operate/downstream-stacks.md`.
 
 ## Authoring DSL

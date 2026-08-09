@@ -4,24 +4,44 @@ GitHub **template for a memQL product**: one repo that becomes a whole product
 running on the shared, product-agnostic
 [memQL engine](https://github.com/znasllc-io/memql).
 
-A product is a **DSL bundle + a client** -- **no product Go and no per-product
-node images** in the common case (platform consolidation,
+A product is a **DSL bundle plus one or more client surfaces** -- **no product
+Go and no per-product node images** in the common case (platform consolidation,
 [memql#2472](https://github.com/znasllc-io/memql/issues/2472)). You **Use this
 template**, run `scripts/init.sh` once to stamp it in place, and you have a
 product repo. The engine and cockpit are cloned as **siblings in the parent
 directory** (the workspace); the composition at deploy time is **two ArgoCD
 Applications** (engine + product), never a cross-repo kustomize base.
 
+### `clients/` is plural
+
+A client is anything a person or another system points at the cluster: a landing
+page, an SPA, a mobile shell, a kiosk, a game. One operator serving one customer
+routinely ships several, and a singular `client/` forced that into either a
+second repo or a second build wedged into the first -- so every surface gets its
+own directory under `clients/`.
+
+The rule that keeps the plumbing from needing a per-product lookup: **a
+surface's directory name is also its npm package name, its image name and its
+k8s workload name.** `init.sh` stamps ONE surface (`clients/<product>-client/`)
+and records it as `CLIENT` in `product.env`; you add more alongside it. The
+engine repo carries exactly one inhabitant of its own `clients/` --
+[`portal/`](https://github.com/znasllc-io/memql/blob/main/clients/README.md),
+the platform's operations console -- which is the worked example this template
+copies.
+
 When a product genuinely needs one-of-a-kind Go that pure DSL and engine-generic
-capabilities cannot express, the thin optional `bff/` escape hatch
-(`init.sh --go-module`) is designed in
-[docs/design/bff-payload.md](docs/design/bff-payload.md) -- exhaust DSL first.
+capabilities cannot express, the thin optional `bff/` escape hatch is **designed
+but not implemented** (`init.sh` has no `--go-module` flag yet) --
+[docs/design/bff-payload.md](docs/design/bff-payload.md) is the spec, and it is
+built when a product first needs it. Exhaust DSL first.
 
 ```
 <workspace>/                    the parent directory (created by init.sh clones)
 ├── <product>/                  THIS repo, stamped -- the whole product
 │   ├── dsl/<product>/          the product DSL (.memql): the whole product surface
-│   ├── client/                 the product frontend (SPA)
+│   ├── clients/                the product's frontends -- PLURAL
+│   │   ├── <product>-client/   the surface init.sh stamps (Vite + React + TS)
+│   │   └── <product>-landing/  ...and any others the product needs
 │   ├── deploy/                 DSL-bundle image + kustomize overlays + ArgoCD manifests
 │   ├── product.env             product identity every operational file reads
 │   └── Makefile                local stack lifecycle (make up|dev|status|down)
@@ -44,6 +64,7 @@ product boots a full stack with zero engine-repo edits.**
    ```
 
    This writes `product.env`; renames `dsl/__PRODUCT__/` -> `dsl/acme/`;
+   renames `clients/__PRODUCT__-client/` -> `clients/acme-client/`;
    substitutes the tokens below only where a tool cannot read `product.env` at
    runtime (DSL contents, k8s/ArgoCD manifest fields, the client package +
    boot defaults, `ONBOARDING.md`, `CLAUDE.md`); clones `../memql` and
@@ -65,11 +86,11 @@ product boots a full stack with zero engine-repo edits.**
    `../memql`):
 
    ```bash
-   make up          # engine mesh + this product (bff + SPA + DSL) on local k3d
+   make up          # engine mesh + this product (bff + clients + DSL) on local k3d
    make dev         # rebuild the DSL bundle and re-mount it on the bff
    make status      # product Application + mesh status
    make down        # tear down
-   cd client && make dev   # the SPA HMR inner loop (Vite on :8080)
+   cd clients/acme-client && make dev   # a surface's HMR inner loop (Vite on :8080)
    ```
 
    The front door serves `https://identity.<domain>`, `https://bff.<domain>`,
@@ -88,7 +109,7 @@ conflicts on plumbing.
 
 | Token | Meaning | Example |
 |---|---|---|
-| `__PRODUCT__` | product name (lowercase slug) | `acme` |
+| `__PRODUCT__` | product name (lowercase slug). Also names the DSL domain (`dsl/acme/`) and the stamped client surface (`clients/acme-client/`) | `acme` |
 | `__PRODUCT_ORG__` | GitHub org/user owning the product repo | `acme-io` |
 | `__DOMAIN__` | engine's fixed local domain (mkcert wildcard); also the staging/prod public-entry placeholder | `local.znas.io` |
 | `__ENGINE_REF__` | engine ref pinned at stamp time (default: latest engine release tag, see below) | `0.12.1` |
@@ -144,7 +165,8 @@ git merge template/main --allow-unrelated-histories   # first time only
 
 The first `--allow-unrelated-histories` merge pulls the template's **pre-stamp**
 tree, so it resurrects what `init.sh` pruned/renamed (`dsl/__PRODUCT__/`,
-`template-ci.yml`, `product.env.example`, `deploy/argocd/apps/__PRODUCT__-*.yaml`).
+`clients/__PRODUCT__-client/`, `template-ci.yml`, `product.env.example`,
+`deploy/argocd/apps/__PRODUCT__-*.yaml`).
 Re-prune them and commit after the first sync (runtime is safe meanwhile -- the
 engine skips `_`-prefixed DSL domains). Later syncs are ordinary merges; expect
 modify/delete conflicts on those paths and resolve by keeping them deleted. See
@@ -161,10 +183,38 @@ the engine; product-specific -> the product repo.
 | `scripts/lib/capability.sh` | vendored capability-script runtime from the engine |
 | `product.env.example` | the product-identity template (pruned by init) |
 | `dsl/__PRODUCT__/` | the starter DSL pack (pure DSL; loads + runs on a plain engine) |
-| `client/` | the client SPA shell (self-contained; builds at stamp time) |
+| `clients/` | the product's client surfaces -- PLURAL, one directory per surface |
+| `clients/__PRODUCT__-client/` | the one surface the template ships: a self-contained SPA shell (builds at stamp time) |
 | `deploy/` | bundle image + kustomize overlays + ArgoCD manifests |
 | `ONBOARDING.md` / `CLAUDE.md` | dev guide + agent guide the stamp personalizes |
 | `.github/workflows/` | `template-ci.yml` (template-only), `ci.yml` (product CI), `gitleaks.yml` |
+
+### Adding a second client surface
+
+`clients/` is plural, so a second surface is additive -- nothing about the first
+one changes:
+
+1. `clients/<product>-landing/` with a `package.json` whose `name` is
+   `<product>-landing`, its own `Dockerfile`, and (copy the stamped surface's)
+   `Makefile` + `scripts/dev/build-image.sh`. Those two are name-agnostic: they
+   derive the image and workload name from their own directory.
+2. A Deployment + Service in `deploy/k8s/base/` (copy `app.yaml`, rename), an
+   `images:` entry per overlay, and a front-door / public-entry route.
+3. Build + import it locally by extending the root Makefile's `product-up` hook
+   from your own `product.mk`:
+
+   ```makefile
+   product-up:: landing-image                       # in ./product.mk
+   landing-image:
+   	$(MAKE) -C clients/$(PRODUCT)-landing image CLUSTER=$(CLUSTER)
+   ```
+
+CI needs no edit: the `clients` lane, the shellcheck sweep and the staging/prod
+digest gate all enumerate rather than name a directory. The **release lockfile**
+does: `deploy/releases/<id>.yaml` pins one `client` component (the surface
+`CLIENT` names), so a second surface's digest is pinned by hand until the
+lockfile shape grows a component per surface -- see
+[deploy/releases/README.md](deploy/releases/README.md).
 
 ### Running two products locally
 

@@ -5,7 +5,8 @@
 # cockpit are cloned as SIBLINGS in the PARENT directory, so they are outside
 # this repo and need no ignore entry here.
 
-# Node / client build artifacts (client/ also has its own .gitignore).
+# Node / client build artifacts (each clients/<surface>/ also has its own
+# .gitignore).
 node_modules/
 dist/
 

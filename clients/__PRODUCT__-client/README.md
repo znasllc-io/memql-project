@@ -1,10 +1,15 @@
 # __PRODUCT__-client
 
-The __PRODUCT__ product frontend: a Vite + React + TypeScript **app shell**. It
+A __PRODUCT__ **client surface**: a Vite + React + TypeScript **app shell**. It
 rides the memQL engine mesh through the product's bff front door and
-demonstrates the platform's **bare-ids client contract** end to end. It lives in
-the `client/` directory of the single-repo product (its DSL is the sibling
-`../dsl/__PRODUCT__/`; the engine is the sibling checkout `../../memql`).
+demonstrates the platform's **bare-ids client contract** end to end.
+
+It lives at `clients/__PRODUCT__-client/` in the single-repo product. `clients/`
+is **plural** -- a product ships as many surfaces as it needs (a landing page,
+an SPA, a game), each in its own directory, and a directory's name is also its
+npm package name, its image name and its k8s workload name. This one is the
+surface `product.env` names as `CLIENT`. Its DSL is `../../dsl/__PRODUCT__/`;
+the engine is the sibling checkout `../../../memql`.
 
 ## What's in the shell
 
@@ -48,7 +53,7 @@ no dependency on an unpublished package**.
 **To wire the real SDK once the product publishes it:**
 
 1. Regenerate the SDK from this repo's `dsl/` (the engine's `sdk-gen` reads the
-   sibling `../../memql` core DSL + `../dsl/__PRODUCT__/`) and publish it, or
+   sibling `../../../memql` core DSL + `../../dsl/__PRODUCT__/`) and publish it, or
    resolve it locally via a `file:` / `npm link` against the built package.
 2. Export `NODE_AUTH_TOKEN` (a GitHub token with `read:packages` for the
    `@__PRODUCT_ORG__` + `@znasllc-io` scopes — `.npmrc` points both there).
@@ -83,14 +88,14 @@ token is never on the wire in clear text.
 ## Local development
 
 Prerequisites: Node ≥ 20, and the engine checked out as a sibling of the repo
-(`../../memql`), as laid out by `scripts/init.sh`.
+(`../../../memql` from here), as laid out by `scripts/init.sh`.
 
 ```bash
 npm install
 
-# Bring up the full local stack (engine mesh + this product's bff + SPA + DSL).
+# Bring up the full local stack (engine mesh + this product's bff + clients + DSL).
 # The STACK lifecycle lives in the repo root, not here:
-make up            # == make -C .. up
+make up            # == make -C ../.. up
 
 # Attached HMR inner loop (Vite on :8080, proxies /memql to https://bff.__DOMAIN__):
 make dev
