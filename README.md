@@ -25,9 +25,12 @@ working second surface. The convention (and the engine's matching
 `clients/README.md`) is in [`clients/README.md`](clients/README.md).
 
 When a product genuinely needs one-of-a-kind Go that pure DSL and engine-generic
-capabilities cannot express, the thin optional `bff/` escape hatch
-(`init.sh --go-module`) is designed in
-[docs/design/bff-payload.md](docs/design/bff-payload.md) -- exhaust DSL first.
+capabilities cannot express, the thin optional `bff/` escape hatch is **designed
+but not implemented**: [docs/design/bff-payload.md](docs/design/bff-payload.md)
+specifies it, including an `init.sh --go-module` flag that does not exist yet
+(`init.sh` declares a closed flag allowlist, so passing it today is a clean
+exit 2, not a silent no-op). Exhaust DSL first; if you reach the wall, that
+document is the design to implement, not a feature to invoke.
 
 ```
 <workspace>/                    the parent directory (created by init.sh clones)
