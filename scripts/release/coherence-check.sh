@@ -4,7 +4,10 @@
 # ==================================
 #
 # The release GATE. Validates a release lockfile:
-#   - both product components (dsl-bundle + client) present,
+#   - the dsl-bundle component plus AT LEAST ONE client-surface component
+#     present (client surfaces are plural -- see clients/README.md; the
+#     component set is read FROM the lockfile, never hardcoded, so a product
+#     with three surfaces is gated on all three),
 #   - every digest a real sha256:<64hex> pin (no floating tags),
 #   - engineRef + registry present;
 # and, with --overlay=<env>, additionally asserts that the RENDERED overlay's
@@ -39,6 +42,19 @@ function lock_comp() {
 
 DIGEST_RE='^sha256:[0-9a-f]{64}$'
 
+# lock_components <file> -- the component keys under `components:`, in file
+# order. Read from the lockfile rather than hardcoded, so N client surfaces are
+# all gated without this script (or promote.sh) knowing their names.
+function lock_components() {
+    awk '
+        /^components:[[:space:]]*$/ { inc=1; next }
+        inc && /^[A-Za-z]/          { inc=0 }
+        inc && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ {
+            k=$1; sub(/:$/,"",k); print k
+        }
+    ' "$1"
+}
+
 # check_overlay <env> <lockfile> -- renders the overlay and compares each product
 # image's rendered digest to the lockfile. Emits COHERENCE-FAIL lines; returns 1
 # on any mismatch.
@@ -61,11 +77,15 @@ function check_overlay() {
         rm -f "$render_err"; return 1
     fi
     rm -f "$render_err"
-    local comp want got
-    for comp in dsl-bundle client; do
+    local comp want got img img_re
+    for comp in $(lock_components "$lf"); do
         want="$(lock_comp "$lf" "$comp" digest)"
-        # Rendered line: image: <registry>/<product>-<comp>@sha256:...
-        got="$(printf '%s\n' "$rendered" | grep -oE "[^ ]*-${comp}@sha256:[0-9a-f]{64}" | head -1 | sed 's/.*@//')"
+        # Match the component's FULL image ref from the lockfile, not a
+        # "-<comp>@" suffix: a suffix match would let a surface named e.g.
+        # "bundle" collide with "-dsl-bundle@" and compare the wrong digest.
+        img="$(lock_comp "$lf" "$comp" image)"
+        img_re="$(printf '%s' "$img" | sed 's/[.[\*^$()+?{|]/\\&/g')"
+        got="$(printf '%s\n' "$rendered" | grep -oE "${img_re}@sha256:[0-9a-f]{64}" | head -1 | sed 's/.*@//')"
         if [ -z "$got" ]; then
             cap_error "COHERENCE-FAIL: overlay $env has no digest-pinned $comp image"; rc=1; continue
         fi
@@ -93,8 +113,15 @@ function main() {
     [ -n "$engine_ref" ] || errs+=("missing engineRef")
     [ -n "$registry" ]   || errs+=("missing registry")
 
-    local comp img dig
-    for comp in dsl-bundle client; do
+    local comps n_comps comp img dig
+    comps="$(lock_components "$lf")"
+    n_comps="$(printf '%s\n' "$comps" | grep -c . || true)"
+    # A lockfile must carry the bundle AND at least one client surface. Without
+    # this the gate would pass vacuously on a lockfile whose components block
+    # failed to render (zero keys parsed = zero checks run).
+    printf '%s\n' "$comps" | grep -qx 'dsl-bundle' || errs+=("missing the dsl-bundle component")
+    [ "$n_comps" -ge 2 ] || errs+=("lockfile has $n_comps component(s); expected the dsl-bundle plus at least one client surface")
+    for comp in $comps; do
         img="$(lock_comp "$lf" "$comp" image)"
         dig="$(lock_comp "$lf" "$comp" digest)"
         [ -n "$img" ] || errs+=("$comp: missing image")
@@ -112,10 +139,10 @@ function main() {
         cap_fail 5 "lockfile failed coherence: ${#errs[@]} problem(s)"
     fi
 
-    cap_step "OK -- $lf: 2 product components digest-pinned + coherent (engine $engine_ref)"
+    cap_step "OK -- $lf: $n_comps product components digest-pinned + coherent (engine $engine_ref)"
     cap_result_set     lockfile "$lf"
     cap_result_set     engineRef "$engine_ref"
-    cap_result_set_raw components 2
+    cap_result_set_raw components "$n_comps"
     if [ -n "$overlay" ]; then cap_result_set overlay "$overlay"; fi
     cap_ok
 }

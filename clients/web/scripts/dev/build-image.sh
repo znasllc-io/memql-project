@@ -1,23 +1,26 @@
 #!/usr/bin/env bash
 #
-# client/scripts/dev/build-image.sh
-# =================================
+# clients/<surface>/scripts/dev/build-image.sh
+# ============================================
 #
-# Build the product SPA container image from this checkout, import it into the
-# local k3d cluster, and roll the in-cluster SPA Deployment. This is the client
+# Build ONE client surface's container image from this checkout, import it into
+# the local k3d cluster, and roll the in-cluster Deployment. This is the client
 # half of the local stack: the root `make up` (which owns the cluster lifecycle)
-# calls `make -C client image`, which runs this. After it, the SPA serves at
-# https://app.$DOMAIN from INSIDE the cluster.
+# calls `make -C clients/<surface> image` once per surface, which runs this.
+# After it, the surface serves from INSIDE the cluster.
 #
-# OPERATIONAL: this file is byte-identical to the template and reads product
-# identity from product.env, so `git merge template/main` never conflicts here.
-# The bundle bakes the LOCAL bootstrap envelope: the bff front door + the local
-# identity URL (the only two VITE_* values src/ actually reads).
+# OPERATIONAL: this file is byte-identical to the template AND to every sibling
+# surface -- it names neither the product nor the surface. The product comes
+# from product.env; the SURFACE is this directory's own name. That is what makes
+# `cp -R clients/web clients/game` a working second surface with no edit here.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLIENT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-REPO_ROOT="$(cd "${CLIENT_ROOT}/.." && pwd)"
+REPO_ROOT="$(cd "${CLIENT_ROOT}/../.." && pwd)"
+
+# The surface name, derived from the directory (clients/web -> "web").
+CLIENT="$(basename "${CLIENT_ROOT}")"
 
 # Product identity from the repo-root product.env (PRODUCT, DOMAIN, ...).
 # shellcheck disable=SC1091
@@ -27,7 +30,10 @@ REPO_ROOT="$(cd "${CLIENT_ROOT}/.." && pwd)"
 
 CLUSTER="${CLUSTER:-memql}"
 NAMESPACE="${NAMESPACE:-memql}"
-IMAGE="${PRODUCT}-client:local"
+# <product>-<surface>: the one naming rule every layer derives from (image,
+# Deployment, Service, kustomize image key, release lockfile component).
+DEPLOY_NAME="${PRODUCT}-${CLIENT}"
+IMAGE="${DEPLOY_NAME}:local"
 WAIT_TIMEOUT="${WAIT_TIMEOUT:-180}"
 
 function info() { printf 'INFO:  %s\n' "$*" >&2; }
@@ -46,20 +52,21 @@ function resolve_packages_token() {
 }
 
 function build_image() {
-    info "Building ${IMAGE} from the client checkout (baking the local envelope)..."
+    info "Building ${IMAGE} from the '${CLIENT}' surface (baking the local envelope)..."
     local secret_arg=()
     if [ -n "${NODE_AUTH_TOKEN:-}" ]; then
         secret_arg=(--secret "id=node_auth_token,env=NODE_AUTH_TOKEN")
     fi
 
-    # Forward only the build args the client Dockerfile actually declares. This
-    # file is byte-identical across products, but each app trims the Dockerfile's
-    # ARG list to the VITE_* values it reads; passing a --build-arg the Dockerfile
-    # no longer declares makes docker warn ("build-arg was not consumed") and
-    # couples this shared script to one product's Dockerfile. So read the declared
-    # `ARG VITE_*` names and, for each, forward its value from the environment (an
-    # explicit override), falling back to the local bootstrap envelope defaults
-    # for the two backend URLs the starter bakes.
+    # Forward only the build args this surface's Dockerfile actually declares.
+    # This file is byte-identical across surfaces and products, but each app
+    # trims the Dockerfile's ARG list to the VITE_* values it reads; passing a
+    # --build-arg the Dockerfile no longer declares makes docker warn
+    # ("build-arg was not consumed") and couples this shared script to one
+    # surface's Dockerfile. So read the declared `ARG VITE_*` names and, for
+    # each, forward its value from the environment (an explicit override),
+    # falling back to the local bootstrap envelope defaults for the two backend
+    # URLs the starter bakes.
     local build_args=()
     local name value
     while IFS= read -r name; do
@@ -92,16 +99,16 @@ function roll_deployment() {
     # (imagePullPolicy: IfNotPresent finds the imported tag). SKIP, do not wait:
     # blocking here deadlocks `make up` (step 4 can never run until step 3
     # returns, but the Deployment only appears in step 4).
-    if ! kubectl get deploy "${PRODUCT}" -n "${NAMESPACE}" &>/dev/null; then
-        info "${PRODUCT} Deployment not present yet -- skipping roll; ArgoCD creates it from the imported ${IMAGE} on first sync (make up registers the product Application after this step)."
+    if ! kubectl get deploy "${DEPLOY_NAME}" -n "${NAMESPACE}" &>/dev/null; then
+        info "${DEPLOY_NAME} Deployment not present yet -- skipping roll; ArgoCD creates it from the imported ${IMAGE} on first sync (make up registers the product Application after this step)."
         return 0
     fi
     # Re-import (make dev, or a repeat make up): the Deployment already exists,
     # so roll it to pick up the freshly re-imported image tag.
-    info "Rolling the ${PRODUCT} Deployment..."
-    kubectl rollout restart "deploy/${PRODUCT}" -n "${NAMESPACE}" >&2
-    kubectl rollout status "deploy/${PRODUCT}" -n "${NAMESPACE}" --timeout="${WAIT_TIMEOUT}s" >&2
-    info "SPA is serving: https://app.${DOMAIN}"
+    info "Rolling the ${DEPLOY_NAME} Deployment..."
+    kubectl rollout restart "deploy/${DEPLOY_NAME}" -n "${NAMESPACE}" >&2
+    kubectl rollout status "deploy/${DEPLOY_NAME}" -n "${NAMESPACE}" --timeout="${WAIT_TIMEOUT}s" >&2
+    info "Surface '${CLIENT}' is serving behind the front door (https://app.${DOMAIN} for the default route)."
 }
 
 function main() {

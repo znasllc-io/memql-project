@@ -16,9 +16,11 @@ what the future implementer builds, turned into an implementation checklist at
 the end.
 
 Engine-contract API names, signatures, and file locations in this document were
-verified against the engine clone at HEAD `3a89674f` (the ref this template
-targets, `ENGINE_REF=main`). The "Verified engine contract surface" table is the
-authority; re-verify against the stamped `ENGINE_REF` at implementation time.
+verified against the engine clone at HEAD `3a89674f`, back when this template
+defaulted `ENGINE_REF=main`. It now defaults to the latest engine **release**
+tag (see the README), so that HEAD is a historical marker, not the ref a stamp
+gets. The "Verified engine contract surface" table is the authority; re-verify
+against the stamped `ENGINE_REF` at implementation time.
 
 ---
 
@@ -334,7 +336,8 @@ runs `image: memql-bff` retargeted per overlay. For a bespoke-Go product the
 the `dsl-bundle` component, and the runtime DSL mount are all unchanged.
 
 - **Name convention:** `<product>-bff` in the product registry, parallel to the
-  existing `<product>-dsl-bundle` and `<product>-client`. The `images:`
+  existing `<product>-dsl-bundle` and the per-surface `<product>-<client>`
+  images (`clients/` is plural -- see `clients/README.md`). The `images:`
   transformer rewrites the base `memql-bff` name:
   - **local** overlay: `newName: <product>-bff`, `newTag: local` -- a
     k3d-imported mutable tag (mirrors `<product>-dsl-bundle:local`).
@@ -342,27 +345,28 @@ the `dsl-bundle` component, and the runtime DSL mount are all unchanged.
     (the registry token init substitutes), `digest: sha256:0000...0000` -- the
     all-zeros fail-closed placeholder the
     build server replaces at activation, exactly as `<product>-dsl-bundle` and
-    `<product>-client` are pinned today.
+    each `<product>-<client>` surface are pinned today.
 - **The neutral `memql-bff` tag-pin is only for no-Go products.** A no-Go
   product keeps the engine `memql-bff` image pinned by **tag** to `ENGINE_REF`
   (an engine-registry image, `acrmemql.azurecr.io/memql-bff`). A Go product
   swaps that entry for the product-registry `<product>-bff` **digest**.
-- **Digest gate composition (a required CI change, section 5.3).** The existing
-  deploy-lane digest gate hardcodes the product-image set as `(-dsl-bundle |
-  -client)` and asserts `>= 2` such images, all `@sha256`-pinned. A product bff
-  is a **third** product image. Adding `-bff` to that literal pattern
-  unconditionally would break **no-Go** products, whose bff is the tag-pinned
-  engine `memql-bff`. Resolve by **generalizing the gate rule**: *every
-  product-registry image (`<registry>/...`) must be digest-pinned;
-  engine-registry images (`acrmemql.azurecr.io/...`, tag-pinned to `ENGINE_REF`)
-  are exempt.* That reframing covers the optional bff without a per-product CI
-  diff and keeps the `>= 2` floor (bundle + client) intact, with the bff an
-  optional third. This gate change ships in the **template** `ci.yml` (inert for
-  no-Go products -- they render zero `<product>-bff` lines).
+- **Digest gate composition (a required CI change, section 5.3).** The
+  deploy-lane digest gate derives the product-image set from the repo -- the
+  DSL bundle plus one per `clients/<name>/` -- and asserts that many images,
+  all `@sha256`-pinned. A product bff is **one more** product image, but it is
+  not a client surface, so it does not fall out of that listing. Adding `-bff`
+  to the derived pattern unconditionally would break **no-Go** products, whose
+  bff is the tag-pinned engine `memql-bff`. Resolve by **generalizing the gate
+  rule**: *every product-registry image (`<registry>/...`) must be
+  digest-pinned; engine-registry images (`acrmemql.azurecr.io/...`, tag-pinned
+  to `ENGINE_REF`) are exempt.* That reframing covers the optional bff without a
+  per-product CI diff and keeps the derived bundle+surfaces floor intact, with
+  the bff an optional extra. This gate change ships in the **template**
+  `ci.yml` (inert for no-Go products -- they render zero `<product>-bff` lines).
 
 The overlay activation checklists gain one line: "if this is a bespoke-Go
 product, replace the `<product>-bff` all-zeros digest with the built image
-digest," alongside the existing bundle/client digest steps.
+digest," alongside the existing bundle + per-surface digest steps.
 
 ---
 
@@ -416,11 +420,12 @@ bff:
 
 ### 5.2 Existing lanes are untouched
 
-`shellcheck`, `capability-conformance`, `client`, `deploy`, `dsl` are unchanged.
-The `changes` filter already runs everything when `.github/`, `scripts/`, or
-`product.env` change; the `bff` lane simply joins the path-filtered set. A no-Go
-product sees the `bff` lane defined-but-always-skipped, exactly like a product
-that touches no `client/` sees the `client` lane skip.
+`shellcheck`, `capability-conformance`, `clients`, `deploy`, `dsl` are
+unchanged. The `changes` filter already runs everything when `.github/`,
+`scripts/`, or `product.env` change; the `bff` lane simply joins the
+path-filtered set. A no-Go product sees the `bff` lane
+defined-but-always-skipped, exactly like a product that touches no `clients/`
+sees the `clients` lane skip.
 
 ### 5.3 Digest gate
 
@@ -466,7 +471,7 @@ for the product-slug token the archive carries in those path names.
 | `go.mod` (`replace => ../memql`) | `bff/go.mod` | The replace rationale + cosmetic-require note still hold verbatim. |
 | `go.work` | root `go.work` | Rework `use` list to `./bff` + `../memql` (single-repo layout, not the old multi-repo constellation). |
 | `.github/workflows/ci.yml` (`go-checks`, `db-tests`) | the template `bff` lane (5.1) + optional db-tests (5.4) | Sibling-engine checkout + `GOWORK=off` pattern is the model. |
-| `scripts/sdk-gen/main.go` | optional `bff/scripts/sdk-gen` | `sdk/gen` (`gen.Options` / `gen.Generate`) still exists in the engine. Only if the product publishes a typed TS SDK; the current template client is self-contained (no SDK), so this is out of scope until a product needs a published SDK. |
+| `scripts/sdk-gen/main.go` | optional `bff/scripts/sdk-gen` | `sdk/gen` (`gen.Options` / `gen.Generate`) still exists in the engine. Only if the product publishes a typed TS SDK; the template's starter client surface is self-contained (no SDK), so this is out of scope until a product needs a published SDK. |
 
 ### 6.2 Stays dead (do not resurrect)
 
@@ -514,7 +519,7 @@ for the product-slug token the archive carries in those path names.
    `go mod tidy`, and does CI gate on a dirty `go.sum`?
 5. **SDK generation demand.** Ship the `sdk-gen` salvage now (behind an
    `init.sh --go-module --with-sdk`?) or defer until a product publishes a typed
-   SDK? Current lean: defer -- the template client is self-contained.
+   SDK? Current lean: defer -- the template's starter surface is self-contained.
 
 ---
 
@@ -530,7 +535,7 @@ for the product-slug token the archive carries in those path names.
   ref it ships with.
 - **No multi-image / leaf-node Go** in the default hatch (open question 1).
 - **No release-lockfile or Azure deploy resurrection** (section 6.2).
-- **No published SDK** by default (the client stays self-contained).
+- **No published SDK** by default (the starter surface stays self-contained).
 
 ---
 

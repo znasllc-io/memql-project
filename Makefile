@@ -35,6 +35,12 @@ NAMESPACE    ?= memql
 # k3d LB ports fixed at cluster-create time; 50051 = the product bff raw gRPC.
 EXTRA_PORTS  ?= 50051:50051
 BUNDLE_IMAGE ?= $(PRODUCT)-dsl-bundle:local
+# The product's CLIENT SURFACES, discovered by listing clients/ -- never
+# enumerated by hand. A product is a DSL bundle plus ONE OR MORE client surfaces
+# (clients/README.md), so every client step below is a loop, and
+# `cp -R clients/web clients/game` joins the lifecycle with no edit here.
+# A surface is a clients/<name>/ directory carrying a Makefile.
+CLIENTS      ?= $(patsubst clients/%/Makefile,%,$(wildcard clients/*/Makefile))
 REVISION      = $(shell git rev-parse --abbrev-ref HEAD)
 # ArgoCD repo URL. The Application tracks THIS repo by URL, so derive it from the
 # actual `origin` remote rather than assuming the GitHub repo is named exactly
@@ -63,13 +69,14 @@ require-env:
 	@test -n "$(PRODUCT)"     || { echo "ERROR: PRODUCT is empty in product.env"; exit 1; }
 	@test -n "$(PRODUCT_ORG)" || { echo "ERROR: PRODUCT_ORG is empty in product.env"; exit 1; }
 	@test -d "$(ENGINE)"      || { echo "ERROR: engine checkout not found at $(ENGINE) -- clone it as a sibling (see README)."; exit 1; }
+	@test -n "$(CLIENTS)"     || { echo "ERROR: no client surfaces found under clients/ (each needs clients/<name>/Makefile) -- see clients/README.md."; exit 1; }
 
 # -----------------------------------------------------------------------------
 # Stack lifecycle
 # -----------------------------------------------------------------------------
 
 .PHONY: up
-## Bring up the whole local stack: engine mesh + this product (bff + SPA + DSL).
+## Bring up the whole local stack: engine mesh + this product (bff + clients + DSL).
 up: require-env
 	@test -n "$(ORIGIN_URL)" || echo "WARN: no 'origin' remote; ArgoCD repo-url falls back to $(REPO_URL) -- push this repo and confirm the URL matches, or ArgoCD will track a repo that may not exist (C12)."
 	@echo "==> [1/4] engine bring-up (cluster + ArgoCD + secrets + engine Application)"
@@ -77,8 +84,11 @@ up: require-env
 	@echo "==> [2/4] build + import the product DSL bundle image"
 	docker build -f deploy/Dockerfile.bundle -t $(BUNDLE_IMAGE) .
 	$(IMPORT) --image=$(BUNDLE_IMAGE) --cluster=$(CLUSTER) --dryRun=false
-	@echo "==> [3/4] build + import the product SPA image"
-	$(MAKE) -C client image CLUSTER=$(CLUSTER)
+	@echo "==> [3/4] build + import each client surface image ($(CLIENTS))"
+	@for c in $(CLIENTS); do \
+		echo "--> clients/$$c"; \
+		$(MAKE) -C clients/$$c image CLUSTER=$(CLUSTER) || exit 1; \
+	done
 	$(MAKE) product-up CLUSTER=$(CLUSTER) NAMESPACE=$(NAMESPACE)
 	@echo "==> [4/4] register the product ArgoCD Application ($(PRODUCT)-local)"
 	MEMQL_K3D_REPO_TOKEN=$${MEMQL_K3D_REPO_TOKEN:-$$(gh auth token 2>/dev/null)} \
@@ -91,7 +101,7 @@ up: require-env
 		--revision=$(REVISION) \
 		--overlay-path=deploy/k8s/overlays/local \
 		--no-secrets
-	@echo "Stack up. Front door: https://app.$(DOMAIN) (SPA), https://bff.$(DOMAIN) (bff)."
+	@echo "Stack up. Front door: https://app.$(DOMAIN) (clients: $(CLIENTS)), https://bff.$(DOMAIN) (bff)."
 
 .PHONY: dev
 ## Rebuild the DSL bundle and re-mount it on the product's bff (no cluster rebuild).
@@ -128,9 +138,10 @@ down:
 #         $(IMPORT) --image=my-extra:local --cluster=$(CLUSTER) --dryRun=false
 #
 # Timing/contract:
-#   - `product-up` runs during `make up` AFTER the SPA image is imported and
-#     BEFORE the product Application is registered, so anything it imports is
-#     already present (imagePullPolicy IfNotPresent) when ArgoCD schedules it.
+#   - `product-up` runs during `make up` AFTER every client-surface image is
+#     imported and BEFORE the product Application is registered, so anything it
+#     imports is already present (imagePullPolicy IfNotPresent) when ArgoCD
+#     schedules it.
 #   - `product-dev` runs during `make dev`.
 #   - Both run ONLY in the local lifecycle; whether those extras are actually
 #     scheduled is the LOCAL overlay's call, so staging/prod stay fail-closed
@@ -170,12 +181,13 @@ help:
 	@echo ""
 	@echo "Product stack ($(if $(PRODUCT),$(PRODUCT),<uninitialized -- run scripts/init.sh>))"
 	@echo ""
-	@echo "  make up        Bring up engine + product (bff + SPA + DSL) on local k3d"
+	@echo "  make up        Bring up engine + product (bff + clients + DSL) on local k3d"
 	@echo "  make dev       Rebuild the DSL bundle and re-mount it on the bff"
 	@echo "  make status    Product Application + mesh status"
 	@echo "  make down      Tear down the local cluster"
 	@echo "  make bundle    Build the DSL bundle image only"
 	@echo "  make render    Render all kustomize overlays (offline)"
 	@echo ""
-	@echo "Client dev loop lives in client/ (make -C client dev | image)."
+	@echo "Client surfaces: $(if $(CLIENTS),$(CLIENTS),<none -- see clients/README.md>)"
+	@echo "  Per-surface dev loop: make -C clients/<name> dev | image"
 	@echo ""

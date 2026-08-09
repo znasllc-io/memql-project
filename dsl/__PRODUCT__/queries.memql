@@ -9,15 +9,20 @@
 //     greetOnGreetingCreate automation, which runs under a SYSTEM actor (so
 //     actor.userId is not the greeting's owner -- it must pass the owner id from
 //     the event payload). NOT surfaced as a tool (it takes an explicit owner).
+// Reading the auth envelope is a DECLARED capability: a construct whose body
+// touches actor.* carries a bare `@actor` annotation (engine memql#2621), and
+// the loader rejects it otherwise. Row intrinsics in sort keys take the `row.`
+// namespace (`row.createdAt`, memql#2786); payload fields stay bare.
 // Grow this file with the product's own queries.
 
 use __PRODUCT__.concepts.{ greeting }
 
 @enabled
 @description("List the caller's greetings, newest first. Owned: the row set is gated by ownerUserId==actor.userId server-side, so cross-user reads are impossible.")
+@actor
 query greeting myGreetings {
   filter   ownerUserId==actor.userId
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape    greetingFull
 }
@@ -29,7 +34,7 @@ query greeting greetingsForOwner {
     ownerUserId  string  @required
   }
   filter   ownerUserId==args.ownerUserId
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape    greetingFull
 }
