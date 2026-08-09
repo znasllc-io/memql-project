@@ -473,7 +473,7 @@ function replace_readme() {
         printf 'Requires the engine + cockpit checked out as siblings (`../memql`,\n'
         printf '`../memql-cockpit`) plus docker, k3d, kubectl, mkcert.\n\n'
         printf '```bash\n'
-        printf 'make up        # engine mesh + this product (bff + SPA + DSL) on local k3d\n'
+        printf 'make up        # engine mesh + this product (bff + clients + DSL) on local k3d\n'
         printf 'make dev       # rebuild the DSL bundle and re-mount it on the bff\n'
         printf 'make status    # product Application + mesh status\n'
         printf 'make down      # tear down\n'

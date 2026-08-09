@@ -95,6 +95,19 @@ spec:
             # by the staging/prod public-entry (app.DOMAIN/memql WS + bff.DOMAIN
             # raw gRPC), so it must verify tokens like the neutral engine bff.
             - { name: MEMQL_IDENTITY_ENABLED, value: "true" }
+            # The memQL Portal (the platform's graphical ops console, the
+            # Cockpit's browser sibling) ships INSIDE every engine image at
+            # /app/portal, but only a node with MEMQL_PORTAL_DIST set serves it.
+            # It is deliberately NOT set here: the engine Application's own
+            # neutral bff already serves it (engine deploy/k8s/components/
+            # engine-bff sets MEMQL_PORTAL_DIST=/app/portal), and this head is
+            # PUBLICLY exposed by the staging/prod entry, where the portal's
+            # static bundle is served unauthenticated (engine PortalPaths()).
+            # To serve it from the product bff too -- e.g. to give operators
+            # https://bff.<domain>/portal/ -- add:
+            #   - { name: MEMQL_PORTAL_DIST, value: "/app/portal" }
+            # and a /portal route on the front door / public entry. The DATA the
+            # portal reads stays gated on the /memql/ws stream it then dials.
             - { name: MEMQL_HTTP_TLS_CA_FILE, value: "/etc/memql/cacerts/ca.crt" }
             - { name: SSL_CERT_DIR, value: "/etc/ssl/certs:/etc/memql/cacerts" }
             # CORS allow-list for the product bff's HTTP/WS surface. NEVER "*": the

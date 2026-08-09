@@ -26,7 +26,7 @@ tracked in memql-project#11; prefer DSL first).
     (Vite + React + TS SPA), recorded as `CLIENT` in `product.env`. Bare-ids
     contract enforced by ESLint. See its `CLAUDE.md`.
   - Adding another is additive -- see `ONBOARDING.md` "Adding a second
-    surface". Never collapse `clients/` back to a singular directory.
+    client surface". Never collapse `clients/` back to a singular directory.
 - `deploy/` -- `Dockerfile.bundle` (the data-only DSL-bundle image) +
   `k8s/{base,components/dsl-bundle,overlays/{local,staging,prod}}` +
   `argocd/` (the product AppProject + staging/prod Applications).

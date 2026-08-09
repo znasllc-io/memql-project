@@ -76,6 +76,29 @@ the extras are scheduled is the LOCAL overlay's call, so staging/prod stay
 fail-closed unless their overlays opt in. See the Makefile's "Product extension
 hooks" section.
 
+## What the engine already gives you (do not rebuild it)
+
+The engine mesh this product layers onto is a whole platform, and its surfaces
+are free:
+
+- **The memQL Portal** -- the platform's graphical operations console, the
+  Cockpit's browser sibling. It ships inside every engine image at `/app/portal`
+  and the engine Application's neutral bff serves it, so a local stack already
+  has it. To serve it from THIS product's bff head too, set
+  `MEMQL_PORTAL_DIST=/app/portal` in `deploy/k8s/base/bff.yaml` and route
+  `/portal` on the front door (the manifest carries the note). Its static bundle
+  is public; the data it reads stays gated on the authenticated `/memql/ws`
+  stream it dials.
+- **memql-cockpit** -- the terminal-native IDE / ops console, cloned as a
+  sibling by `init.sh`. It dials the product bff's raw gRPC on
+  `bff.__DOMAIN__:50051`.
+- **Identity** -- magic-link login, JWKS, PATs, the admin surface. Engine-owned;
+  the product never implements auth.
+
+The engine repo carries its own `clients/portal/` as the WORKED EXAMPLE of the
+convention this repo mirrors -- read `memql/clients/README.md` when wiring a new
+surface here.
+
 ## The DSL (the whole product surface)
 
 `dsl/__PRODUCT__/` holds `concepts` / `queries` / `mutations` / `shapes` /
@@ -120,7 +143,7 @@ name**, its **image name** and its **k8s workload name**. The shared
 build and what to roll from their own directory, so they stay byte-identical
 across surfaces and across products.
 
-### Adding a second surface
+### Adding a second client surface
 
 1. `clients/__PRODUCT__-landing/` with a `package.json` named
    `__PRODUCT__-landing`, its own `Dockerfile`, and a copy of the stamped
@@ -232,5 +255,7 @@ diverge -- that is expected; keep the plumbing byte-identical.
 - `CLAUDE.md` -- this repo's agent guide.
 - `clients/__PRODUCT__-client/CLAUDE.md` -- SPA architecture + the bare-ids contract.
 - `memql/docs/public/operate/downstream-stacks.md` -- the downstream contract.
+- `memql/clients/README.md` -- the `clients/` convention and its worked example
+  (the engine's own portal), which this repo mirrors.
 - `memql/docs/public/build/building-a-pack.md` + `docs/public/language/authoring-rules.md`
   -- the DSL authoring contract.
