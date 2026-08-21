@@ -85,15 +85,15 @@ spec:
             # Expected issuer. The base value is the LOCAL issuer -- for a local
             # stack DOMAIN is the engine's fixed local domain (local.znas.io), so
             # this resolves to the same issuer the engine's local mesh verifies
-            # against. staging/prod render their own public identity host and so
-            # OVERRIDE this via the overlay's identity-config.yaml patch (a
-            # per-environment patch point; see the overlay activation checklist).
+            # against. The cloud overlay renders its own public identity host and
+            # so OVERRIDES this via its identity-config.yaml patch (a per-target
+            # patch point; see the overlay activation checklist).
             - { name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER, value: "https://identity.__DOMAIN__" }
-            # Authentication is ON in every environment (the engine's own
-            # engine-bff component sets "true" even locally; the engine forbids a
-            # 0 here in staging/prod and alerts on it). The product bff is exposed
-            # by the staging/prod public-entry (app.DOMAIN/memql WS + bff.DOMAIN
-            # raw gRPC), so it must verify tokens like the neutral engine bff.
+            # Authentication is ON everywhere, local and cloud alike -- env
+            # parity (the engine's own engine-bff component sets "true" even
+            # locally). The product bff is exposed by the cloud public-entry
+            # (app.DOMAIN/memql WS + bff.DOMAIN raw gRPC), so it must verify
+            # tokens like the neutral engine bff.
             - { name: MEMQL_IDENTITY_ENABLED, value: "true" }
             - { name: MEMQL_HTTP_TLS_CA_FILE, value: "/etc/memql/cacerts/ca.crt" }
             - { name: SSL_CERT_DIR, value: "/etc/ssl/certs:/etc/memql/cacerts" }
@@ -101,10 +101,10 @@ spec:
             # bff is a CREDENTIALED API (it carries user bearer tokens), so a
             # wildcard origin lets any site drive it with the user's session. The
             # base value is the LOCAL front-door origin (app.DOMAIN, where DOMAIN is
-            # the engine's fixed local domain). staging/prod serve the SPA at their
-            # own public host and so OVERRIDE this via the overlay's
-            # identity-config.yaml patch -- the same per-environment patch point as
-            # the issuer above (see the overlay activation checklist).
+            # the engine's fixed local domain). The cloud overlay serves the SPA at
+            # its own public host and so OVERRIDES this via its
+            # identity-config.yaml patch -- the same per-target patch point as the
+            # issuer above (see the overlay activation checklist).
             - { name: SERVER_ALLOWED_ORIGINS, value: "https://app.__DOMAIN__" }
             # The memQL Portal is DELIBERATELY NOT SERVED by the product bff.
             #
@@ -129,7 +129,7 @@ spec:
             # engine's PUBLIC path set (static bytes, identical for every visitor
             # -- a browser must fetch the bundle before any application code
             # exists to authenticate), and this head is published to the internet
-            # by the staging/prod entry (app.DOMAIN + bff.DOMAIN). The DATA the
+            # by the cloud public entry (app.DOMAIN + bff.DOMAIN). The DATA the
             # portal reads stays gated on the /memql/ws stream it then dials, but
             # the console itself becomes publicly reachable.
             # Shared DB -- migrations run once on the engine identity node.

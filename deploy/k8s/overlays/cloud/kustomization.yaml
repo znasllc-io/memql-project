@@ -1,10 +1,18 @@
-# __PRODUCT__ STAGING overlay -- the product Application reconciled by
-# deploy/argocd/apps/__PRODUCT__-staging.yaml. It owns ONLY product resources:
+# __PRODUCT__ CLOUD overlay -- the product Application reconciled by
+# deploy/argocd/apps/__PRODUCT__-cloud.yaml. It owns ONLY product resources:
 # the bff head + client surfaces (../../base), the runtime DSL bundle (vendored
 # dsl-bundle component), and the public nginx/cert-manager entry. The engine
 # mesh (identity/voice/mcp/cognition/agent/planner/workbench + the neutral bff)
 # is the SEPARATE engine Application (two Applications, not a kustomize remote
 # base; see downstream-stacks.md).
+#
+# ONE INSTALLATION SHAPE (engine epic znasllc-io/memql#3943). This is the only
+# cloud overlay: `local` and `cloud` are the two deploy TARGETS of one shape,
+# and everything here is a VALUE over ../../base -- the image pins, the public
+# hostnames, the issuer + CORS patch. A second environment is a second INSTANCE
+# with its own ArgoCD, domain and database (see the Application header), never
+# a second overlay of this one, so there is no promotion step between overlays:
+# a release is pinned here once, from its lockfile (deploy/releases/README.md).
 #
 # OAuth client registration: the SPA's client_id + redirect URI
 # (https://app.__DOMAIN__/auth/callback) are registered on the ENGINE identity
@@ -17,17 +25,19 @@
 # pointing an ArgoCD Application at this overlay, complete the ACTIVATION
 # CHECKLIST:
 #   1. Set REGISTRY (product.env) and replace the all-zeros image digests below
-#      with the digests the build server produced (they fail closed until then).
-#   2. Set the STAGING public hostnames + domain: the app./identity./bff./mcp.
-#      __DOMAIN__ hosts and the ACME `email:` in public-entry.yaml must be the
-#      real staging domain (NOT the local default local.znas.io).
+#      with the digests the build server produced (they fail closed until then):
+#      `scripts/release/promote.sh --release=<id>` copies them in from the
+#      release lockfile.
+#   2. Set the public hostnames + domain: the app./identity./bff./mcp.
+#      __DOMAIN__ hosts and the ACME `email:` in public-entry.yaml must be this
+#      instance's real domain (NOT the local default local.znas.io).
 #   3. Set the token issuer + CORS origin: identity-config.yaml overrides the
-#      bff's MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER to the staging identity host
-#      and SERVER_ALLOWED_ORIGINS to the staging app host (https://app.<domain>).
+#      bff's MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER to this instance's identity
+#      host and SERVER_ALLOWED_ORIGINS to its app host (https://app.<domain>).
 #      Both must match the hostnames from step 2, or the bff rejects every token /
 #      blocks the SPA's cross-origin calls. NEVER wildcard the CORS origin -- the
 #      bff is a credentialed API. B2.
-#   4. Verify the ArgoCD repoURL: deploy/argocd/apps/__PRODUCT__-staging.yaml +
+#   4. Verify the ArgoCD repoURL: deploy/argocd/apps/__PRODUCT__-cloud.yaml +
 #      project.yaml bake `https://github.com/__PRODUCT_ORG__/__PRODUCT__.git`,
 #      which assumes the GitHub repo is named exactly <product>. If your repo has
 #      a different name, fix repoURL in both files (and the project sourceRepos)
@@ -51,8 +61,9 @@ resources:
 components:
   - ../../components/dsl-bundle
 
-# Per-environment issuer patch point (B2): staging serves identity at its own
-# public host, so override the bff's expected issuer away from the local default.
+# Issuer + CORS patch point (B2): the cloud instance serves identity and the SPA
+# at its own public hosts, so override the bff's expected issuer and allowed
+# origin away from the local defaults the base carries.
 patches:
   - path: identity-config.yaml
 

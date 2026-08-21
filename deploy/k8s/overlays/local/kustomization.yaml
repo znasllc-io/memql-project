@@ -6,8 +6,8 @@
 #
 # Local image discipline (mirrors the engine's local overlay): mutable `:local`
 # tags + IfNotPresent, because images are `k3d image import`ed, never pulled
-# from a registry. No digest pins here (staging/prod pin by digest). Works with
-# REGISTRY unset -- there is no registry in the local flow.
+# from a registry. No digest pins here (the cloud overlay pins by digest). Works
+# with REGISTRY unset -- there is no registry in the local flow.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 

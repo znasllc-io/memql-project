@@ -22,6 +22,11 @@ tag (see the README), so that HEAD is a historical marker, not the ref a stamp
 gets. The "Verified engine contract surface" table is the authority; re-verify
 against the stamped `ENGINE_REF` at implementation time.
 
+> Footnote (engine epic memql#3943; memql#4205): written when the template
+> shipped `staging` + `prod` overlays. It now ships ONE installation shape --
+> two overlays, `local` and `cloud` -- so read every `staging/prod` below as
+> `cloud`; the re-pin story itself is unchanged. Design record, not rewritten.
+
 ---
 
 ## 1. When to reach for it (the decision rubric)

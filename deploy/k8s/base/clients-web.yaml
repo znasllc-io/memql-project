@@ -11,9 +11,9 @@
 # -s dist -l 8080` serves the built Vite bundle. The browser-facing config
 # (VITE_MEMQL_HTTP_URL, VITE_IDENTITY_BASE_URL) is baked at build time, so the
 # running container needs no runtime env. The overlays pin the image (local ->
-# a k3d-imported `__PRODUCT__-web:local`, staging/prod -> a digest-pinned
-# registry image). The front door routes `/` here and `/memql` to
-# bff-__PRODUCT__; a second surface takes its own hostname or path prefix.
+# a k3d-imported `__PRODUCT__-web:local`, cloud -> a digest-pinned registry
+# image). The front door routes `/` here and `/memql` to bff-__PRODUCT__; a
+# second surface takes its own hostname or path prefix.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

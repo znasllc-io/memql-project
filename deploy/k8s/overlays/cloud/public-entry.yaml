@@ -1,5 +1,5 @@
-# Public HTTPS entry for the __PRODUCT__ product (staging/prod). Requires the
-# cluster add-ons installed out-of-band:
+# Public HTTPS entry for the __PRODUCT__ product (the cloud overlay). Requires
+# the cluster add-ons installed out-of-band:
 #   - ingress-nginx controller (LoadBalancer + a pinned static IP)
 #   - cert-manager (issues the Let's Encrypt certs referenced below)
 #

@@ -75,8 +75,8 @@ product boots a full stack with zero engine-repo edits.**
    engine's local domain** (`local.znas.io`), so a custom local domain has
    nothing serving `identity.<domain>` (magic-link login impossible, TLS
    mismatched, the bff rejects every token). `DOMAIN` matters for the
-   **staging/prod public entries**, which you set on the overlays at activation
-   time (see each overlay's activation checklist) -- not per local stamp.
+   **cloud public entry**, which you set on the cloud overlay at activation
+   time (see its activation checklist) -- not per local stamp.
 
 3. Bring up the stack (requires docker, k3d, kubectl, mkcert, and the sibling
    `../memql`):
@@ -107,7 +107,7 @@ conflicts on plumbing.
 |---|---|---|
 | `__PRODUCT__` | product name (lowercase slug) | `acme` |
 | `__PRODUCT_ORG__` | GitHub org/user owning the product repo | `acme-io` |
-| `__DOMAIN__` | engine's fixed local domain (mkcert wildcard); also the staging/prod public-entry placeholder | `local.znas.io` |
+| `__DOMAIN__` | engine's fixed local domain (mkcert wildcard); also the cloud public-entry placeholder | `local.znas.io` |
 | `__ENGINE_REF__` | engine ref pinned at stamp time (default: latest engine release tag, see below) | `0.12.1` |
 | `__REGISTRY__` | container registry for the product images | `ghcr.io/acme-io` |
 
@@ -138,15 +138,30 @@ consolidation release -- engine release gap
 [znasllc-io/memql#2510](https://github.com/znasllc-io/memql/issues/2510),
 flip-back [znasllc-io/memql-project#14](https://github.com/znasllc-io/memql-project/issues/14).)
 
+### One installation shape: two deploy targets, no environments
+
+The template ships exactly two overlays: `deploy/k8s/overlays/local` (the k3d
+parity cluster `make up` registers as `<product>-local`) and
+`deploy/k8s/overlays/cloud` (reconciled by the one committed ArgoCD
+Application, `deploy/argocd/apps/<product>-cloud.yaml`). They are two deploy
+**targets** of one shape -- values over one `deploy/k8s/base` -- not two
+environments of one install. There is no staging-versus-production dimension
+and no promotion step between overlays (engine epic
+[znasllc-io/memql#3943](https://github.com/znasllc-io/memql/issues/3943)): an
+operator who wants a second environment installs a **second instance**, with
+its own cluster or at least its own ArgoCD, its own domain and its own
+database, and pins its own release there. Do not add an overlay, a Makefile
+loop entry or a CI matrix row to stand for an environment.
+
 ### ArgoCD repo-URL naming invariant
 
-The staging/prod ArgoCD manifests (`deploy/argocd/apps/*` + `project.yaml`) bake
-`https://github.com/<product-org>/<product>.git` -- i.e. they assume your GitHub
-repo is named **exactly `<product>`**. The local `make up` sidesteps this by
-deriving the repo URL from your `origin` remote, but the committed ArgoCD
-manifests cannot. If your repo has a different name, fix `repoURL` in both app
-files and the project `sourceRepos` before activating staging/prod (called out in
-each overlay's activation checklist).
+The cloud ArgoCD manifests (`deploy/argocd/apps/<product>-cloud.yaml` +
+`project.yaml`) bake `https://github.com/<product-org>/<product>.git` -- i.e.
+they assume your GitHub repo is named **exactly `<product>`**. The local
+`make up` sidesteps this by deriving the repo URL from your `origin` remote, but
+the committed ArgoCD manifests cannot. If your repo has a different name, fix
+`repoURL` in the app file and the project `sourceRepos` before activating the
+cloud overlay (called out in its activation checklist).
 
 ## Staying in sync with the template (for stamped products)
 

@@ -49,7 +49,7 @@ image:
 # BUILD / CHECK
 # =============================================================================
 
-## Production build (TypeScript check + Vite bundle).
+## Build (TypeScript check + Vite bundle).
 build:
 	$(NPM) run build
 
@@ -89,7 +89,7 @@ help:
 	@echo "Surface dev loop:"
 	@echo "  make dev         Vite dev server (port per vite config; cluster must be up)"
 	@echo "  make image       Build + import + roll this surface's in-cluster image"
-	@echo "  make build       Production build (tsc + vite)"
+	@echo "  make build       Build (tsc --noEmit + vite build)"
 	@echo "  make typecheck   tsc --noEmit"
 	@echo "  make lint        bare-ids ESLint contract"
 	@echo ""

@@ -136,8 +136,13 @@ jobs:
           else
             test ! -e "dsl/$PRODUCT/namespace.pin"
           fi
-          test -f "deploy/argocd/apps/$PRODUCT-staging.yaml"
-          test -f "deploy/argocd/apps/$PRODUCT-prod.yaml"
+          # ONE INSTALLATION SHAPE (engine epic znasllc-io/memql#3943): exactly
+          # two overlays (local + cloud) and exactly one committed ArgoCD
+          # Application (the cloud one; the local Application is registered by
+          # `make up`, not committed). Closed-set assertions, so an overlay or
+          # an Application added to stand for an environment fails here by name.
+          test "$(ls deploy/k8s/overlays | sort | tr '\n' ' ')" = "cloud local "
+          test "$(ls deploy/argocd/apps)" = "$PRODUCT-cloud.yaml"
           test -f product.env && grep -qx "PRODUCT=$PRODUCT" product.env
           test ! -e product.env.example
           test ! -e .github/workflows/template-ci.yml   # pruned in the stamped copy
@@ -180,18 +185,18 @@ jobs:
 
       - name: kustomize renders every overlay (stamped)
         run: |
-          for o in local staging prod; do
+          for o in local cloud; do
             echo "==> render deploy/k8s/overlays/$o"
             kubectl kustomize "$STAMP_DIR/deploy/k8s/overlays/$o" > /dev/null
           done
 
-      - name: staging/prod render with identity ENABLED (B2)
-        # Authentication must be ON in the public-facing overlays; a rendered
+      - name: cloud render with identity ENABLED (B2)
+        # Authentication must be ON in the public-facing overlay; a rendered
         # MEMQL_IDENTITY_ENABLED="false" would ship the internet-exposed bff with
-        # auth disabled. Assert the product bff's value is "true" in both.
+        # auth disabled. Assert the product bff's value is "true" there.
         run: |
           set -euo pipefail
-          for o in staging prod; do
+          for o in cloud; do
             kubectl kustomize "$STAMP_DIR/deploy/k8s/overlays/$o" > "/tmp/render-$o.yaml"
             v="$(grep -A1 'name: MEMQL_IDENTITY_ENABLED' "/tmp/render-$o.yaml" | grep -m1 'value:' | sed 's/.*value: *//; s/"//g')"
             [ "$v" = "true" ] || { echo "ERROR: $o renders MEMQL_IDENTITY_ENABLED=$v (want true)" >&2; exit 1; }
@@ -200,12 +205,12 @@ jobs:
       - name: product bff CORS origin is concrete, never wildcard (#16)
         # SERVER_ALLOWED_ORIGINS must never render "*" on the credentialed product
         # bff (it carries user bearer tokens). Base renders the LOCAL front-door
-        # origin (https://app.<domain>); staging/prod OVERRIDE it to their public
-        # app host via identity-config.yaml. Assert EVERY overlay renders a
+        # origin (https://app.<domain>); the cloud overlay OVERRIDES it to its
+        # public app host via identity-config.yaml. Assert EVERY overlay renders a
         # concrete, non-empty, non-wildcard origin -- the CORS half of #16.
         run: |
           set -euo pipefail
-          for o in local staging prod; do
+          for o in local cloud; do
             kubectl kustomize "$STAMP_DIR/deploy/k8s/overlays/$o" > "/tmp/cors-$o.yaml"
             v="$(grep -A1 'name: SERVER_ALLOWED_ORIGINS' "/tmp/cors-$o.yaml" | grep -m1 'value:' | sed 's/.*value: *//; s/"//g')"
             case "$v" in

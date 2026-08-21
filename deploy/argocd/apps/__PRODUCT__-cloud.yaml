@@ -1,0 +1,56 @@
+# The __PRODUCT__ product CLOUD Application -- the ONE committed Application
+# (engine epic znasllc-io/memql#3943; memql#4205). It reconciles
+# deploy/k8s/overlays/cloud (bff head + every client surface + public entry +
+# runtime DSL bundle) into the in-cluster memql namespace, alongside the
+# SEPARATE engine Application (two Applications per the downstream-stacks
+# contract).
+#
+# ONE INSTALLATION SHAPE. There is no staging-versus-production dimension: this
+# repo ships exactly two overlays, `local` (the k3d parity cluster, registered
+# as `__PRODUCT__-local` by `make up`) and `cloud` (this Application). What
+# varies between them is the deploy TARGET -- the engine's `provider` axis,
+# docker-local | azure -- as VALUES over one base, never a second shape. An
+# operator who wants a second environment installs a SECOND INSTANCE: its own
+# cluster (or at least its own ArgoCD), its own domain, its own database, its
+# own pinned release. If that instance is stamped from this repo it gets its
+# own overlay directory and its own Application in ITS OWN ArgoCD (the engine's
+# deploy/k8s/overlays/cloud-entry is the worked example) -- not a second
+# Application beside this one, and nothing promotes between the two. Two
+# Applications that differed only in which overlay they named used to live
+# here (`staging` + `prod`); they are gone with the environment concept that
+# motivated them.
+#
+# INITIALLY MANUAL-SYNC (the `automated:` block is intentionally omitted): sync
+# once by hand and verify the render before promoting to
+# `automated: {prune: true, selfHeal: true}`.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: __PRODUCT__-cloud
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: __PRODUCT__
+  source:
+    repoURL: https://github.com/__PRODUCT_ORG__/__PRODUCT__.git
+    targetRevision: main
+    path: deploy/k8s/overlays/cloud
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: memql
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=false
+      - RespectIgnoreDifferences=true
+      - ApplyOutOfSyncOnly=true
+  # memql-secrets is created out-of-band (real values) and is NOT in git, so it
+  # is never pruned. Replica count is a RUNTIME dimension as well as a committed
+  # value (`make scale N=<n>` writes /spec/replicas directly); ignoring it keeps
+  # a deliberate scale from reading as drift, and the committed counts remain
+  # what a fresh reconcile establishes.
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas

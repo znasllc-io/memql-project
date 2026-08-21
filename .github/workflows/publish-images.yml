@@ -2,7 +2,7 @@ name: publish-images
 
 # Build the product's images -- the DSL bundle (deploy/Dockerfile.bundle) plus
 # ONE per client surface (clients/<name>/Dockerfile) -- and push them to the
-# product registry, digest-pinned, so a staging/prod overlay can be pinned by
+# product registry, digest-pinned, so the cloud overlay can be pinned by
 # @sha256.
 #
 # Client surfaces are PLURAL (clients/README.md) and are DISCOVERED by listing
@@ -115,9 +115,10 @@ jobs:
           # Client build-time envelope (each surface Dockerfile's two documented
           # VITE_ ARGs). Applied to EVERY surface in the run.
           # Empty -> the Dockerfile default (starter/sim single-DOMAIN fallback).
-          # NON-empty -> a correctly-configured but ENV-SPECIFIC client digest;
-          # see the SPA build-time caveat in deploy/releases/README.md before
-          # relying on the exact-bytes staging->prod promote for the client image.
+          # NON-empty -> a correctly-configured but INSTANCE-SPECIFIC client
+          # digest (it bakes that instance's hostnames); see the client
+          # build-time caveat in deploy/releases/README.md before reusing such a
+          # digest for a second instance.
           VITE_MEMQL_HTTP_URL: ${{ inputs.vite_memql_http_url }}
           VITE_IDENTITY_BASE_URL: ${{ inputs.vite_identity_base_url }}
         run: |
@@ -234,7 +235,7 @@ jobs:
             echo "  --release=$TAG --engine-ref=$engine_ref \\"
             echo "  --bundle-digest=$bundle_digest \\"
             echo "  --client-digests=$client_digests"
-            echo "scripts/release/promote.sh --release=$TAG --to-env=staging"
+            echo "scripts/release/promote.sh --release=$TAG"
             echo '```'
             echo ""
             echo "### release lockfile (deploy/releases/$TAG.yaml)"

@@ -3,13 +3,24 @@
 # scripts/release/promote.sh
 # ==========================
 #
-# Pin an environment overlay's product images to a validated release lockfile,
-# by DIGEST COPY -- no rebuild. This is BOTH the initial staging pin and the
-# staging->prod promote: the target env gets the EXACT bytes the release built,
-# so environments differ only by config, never image content.
+# Pin the cloud overlay's product images to a validated release lockfile, by
+# DIGEST COPY -- no rebuild. The overlay gets the EXACT bytes the release built,
+# so a running instance differs from CI's build only by config, never by image
+# content.
 #
-#   promote.sh --release=<id> --to-env=staging   # pin staging to a release
-#   promote.sh --release=<id> --to-env=prod      # promote the same bytes to prod
+#   promote.sh --release=<id>                  # pin deploy/k8s/overlays/cloud
+#   promote.sh --release=<id> --overlay=<dir>  # pin another digest-pinned overlay
+#
+# ONE INSTALLATION SHAPE (engine epic znasllc-io/memql#3943): there is no
+# promotion between environments because there are no environments -- `local`
+# and `cloud` are two deploy TARGETS of one shape, and a second environment is
+# a second INSTANCE with its own ArgoCD, domain and database. So the target
+# here is an OVERLAY, named the way coherence-check.sh names it, defaulting to
+# `cloud` (the one cloud overlay this repo ships); a second instance that lives
+# in this repo as its own overlay directory is pinned the same way, by name.
+# `local` is refused (it pins by :local tag for k3d import, never by digest).
+# The former --to-env flag carried the retired environment axis; it is gone,
+# not aliased.
 #
 # It re-runs the coherence gate on the lockfile first (refusing an incoherent
 # set), rewrites ONLY the product images' newName+digest in the target overlay's
@@ -29,12 +40,35 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/capability.sh"
 
 cap_init "release.promote" "Pin an overlay's product images from a release lockfile (digest copy, no rebuild)."
 cap_spec_param "release"  "release id -- reads deploy/releases/<release>.yaml (required)"
-cap_spec_param "to-env"   "target overlay env: staging|prod (required)"
+cap_spec_param "overlay"  "digest-pinned overlay to pin: a directory name under deploy/k8s/overlays/ (default: cloud; local is refused)"
 cap_spec_param "lockfile" "explicit lockfile path (default: deploy/releases/<release>.yaml)"
 cap_spec_param "dry-run"  "print the rewritten overlay to stderr; do not write (flag)"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Unknown-flag allowlist, the same local guard scripts/init.sh carries: the
+# vendored cap_parse_flags accepts ANY --flag (it only rejects positionals), so
+# without this a retired flag such as --to-env would be silently ignored and
+# the cloud overlay pinned as if nothing were wrong. Exit 2 instead. Upstream
+# fix tracked in znasllc-io/memql#2508; drop this when it lands.
+CAP_KNOWN_FLAGS=" release overlay lockfile dry-run help print-spec params-stdin "
+
+# reject_unknown_flags "$@" -- exit 2 on any --flag not in CAP_KNOWN_FLAGS.
+function reject_unknown_flags() {
+    local a name
+    for a in "$@"; do
+        case "$a" in
+            --*=*) name="${a%%=*}"; name="${name#--}" ;;
+            --*)   name="${a#--}" ;;
+            *)     cap_fail 2 "unexpected positional argument: $a" ;;
+        esac
+        case "$CAP_KNOWN_FLAGS" in
+            *" $name "*) ;;
+            *) cap_fail 2 "unknown flag: --$name (see --help; the environment axis is gone, so there is no --to-env)" ;;
+        esac
+    done
+}
 
 # lock_scalar / lock_comp -- read the simple, fixed-shape lockfile (see
 # assemble-lockfile.sh); kept standalone so promote.sh needs no shared lib.
@@ -93,6 +127,7 @@ function rewrite_one() {
 
 function main() {
     cap_handle_meta "$@"
+    reject_unknown_flags "$@"
     cap_parse_flags "$@"
 
     if [ -f "$REPO_ROOT/product.env" ]; then
@@ -100,19 +135,24 @@ function main() {
         . "$REPO_ROOT/product.env"
     fi
 
-    local release env lf dry
+    local release overlay lf dry
     release="$(cap_param release "")"
-    env="$(cap_param to-env "")"
+    overlay="$(cap_param overlay "cloud")"
     dry="$(cap_flag dry-run)"
     cap_require release "$release"
-    cap_require to-env "$env"
-    case "$env" in staging|prod) ;; *) cap_fail 2 "--to-env must be staging|prod (got '$env')" ;; esac
+    # The target is an overlay DIRECTORY NAME, never a path, and never `local`:
+    # the local overlay pins mutable :local tags for k3d import, so there is no
+    # digest to rewrite there (rewrite_one would refuse it, less clearly).
+    case "$overlay" in
+        local)     cap_fail 2 "--overlay=local is refused: the local overlay pins by :local tag, never by digest" ;;
+        ""|*/*|.*) cap_fail 2 "--overlay must be a bare directory name under deploy/k8s/overlays/ (got '$overlay')" ;;
+    esac
     [ -n "${PRODUCT:-}" ] || cap_fail 4 "PRODUCT not set -- run scripts/init.sh (product.env missing?)"
 
     lf="$(cap_param lockfile "$REPO_ROOT/deploy/releases/$release.yaml")"
     [ -f "$lf" ] || cap_fail 4 "lockfile not found: $lf"
-    local overlay="$REPO_ROOT/deploy/k8s/overlays/$env/kustomization.yaml"
-    [ -f "$overlay" ] || cap_fail 4 "overlay not found: $overlay"
+    local overlay_file="$REPO_ROOT/deploy/k8s/overlays/$overlay/kustomization.yaml"
+    [ -f "$overlay_file" ] || cap_fail 4 "overlay not found: $overlay_file"
 
     # Gate: never copy digests from an incoherent lockfile.
     if ! bash "$SCRIPT_DIR/coherence-check.sh" --lockfile="$lf" >/dev/null; then
@@ -127,7 +167,7 @@ function main() {
     # matched exactly once. `pinned` accumulates the per-component summary.
     local tmp next comp key newname digest counts pinned=""
     tmp="$(mktemp)"; next="$(mktemp)"
-    cp "$overlay" "$tmp"
+    cp "$overlay_file" "$tmp"
     for comp in $comps; do
         key="$(overlay_image_key "$comp")"
         # newName comes from the lockfile's own image field -- the same value
@@ -141,7 +181,7 @@ function main() {
         fi
         if ! counts="$(rewrite_one "$tmp" "$key" "$newname" "$digest" "$next")"; then
             rm -f "$tmp" "$next"
-            cap_fail 5 "overlay $env not rewritten as expected for component '$comp' ($counts) -- its image name block ('$key') may have drifted, or the overlay pins no such image; overlay left untouched: $overlay"
+            cap_fail 5 "overlay $overlay not rewritten as expected for component '$comp' ($counts) -- its image name block ('$key') may have drifted, or the overlay pins no such image; overlay left untouched: $overlay_file"
         fi
         mv "$next" "$tmp"; next="$(mktemp)"
         pinned="${pinned:+$pinned }$comp=$digest"
@@ -149,24 +189,26 @@ function main() {
     rm -f "$next"
 
     if [ -n "$dry" ]; then
-        cap_step "dry-run: $overlay would be rewritten to:"
+        cap_step "dry-run: $overlay_file would be rewritten to:"
         cat "$tmp" >&2
         rm -f "$tmp"
         cap_result_set release "$release"
         cap_result_set overlay "$overlay"
+        cap_result_set overlayFile "$overlay_file"
         cap_ok
     fi
 
-    mv "$tmp" "$overlay"
-    cap_step "pinned $overlay to release $release ($pinned)"
+    mv "$tmp" "$overlay_file"
+    cap_step "pinned $overlay_file to release $release ($pinned)"
 
     # Re-assert: the rewritten overlay must render + match the lockfile digests.
-    if ! bash "$SCRIPT_DIR/coherence-check.sh" --lockfile="$lf" --overlay="$env" >/dev/null; then
-        cap_fail 5 "overlay $env did not match the lockfile after pinning -- inspect $overlay"
+    if ! bash "$SCRIPT_DIR/coherence-check.sh" --lockfile="$lf" --overlay="$overlay" >/dev/null; then
+        cap_fail 5 "overlay $overlay did not match the lockfile after pinning -- inspect $overlay_file"
     fi
 
     cap_result_set     release "$release"
     cap_result_set     overlay "$overlay"
+    cap_result_set     overlayFile "$overlay_file"
     cap_result_set     pinned "$pinned"
     cap_result_set_raw components "$(printf '%s\n' "$comps" | grep -c .)"
     cap_changed
