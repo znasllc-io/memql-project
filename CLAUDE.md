@@ -9,8 +9,25 @@ Applications (engine + this product).
 This ONE repo is the whole product surface. It was stamped from the
 [memql-project](https://github.com/znasllc-io/memql-project) template by
 `scripts/init.sh`; there is no carrier repo, no product `go.work`, no product Go
-module unless the product later invents bespoke Go (a thin `bff/` plugin --
-tracked in memql-project#11; prefer DSL first).
+module unless the product later invents bespoke Go (a thin `bff/` **pack**
+module -- tracked in memql-project#11; prefer DSL first).
+
+## The three extension words
+
+memQL has **exactly three**, and this repo inherits the vocabulary lock (engine
+memql#4135 / epic memql#4161, gated by `extension_vocabulary_test.go` there).
+Do not invent a fourth; the canonical statement is the engine's
+[component vs integration vs pack](https://github.com/znasllc-io/memql/blob/main/docs/public/concepts/component-integration-pack.md).
+
+- **component** -- engine internals. Not something a product writes.
+- **integration** -- Go that talks OUT to another service, reached from DSL via
+  `@executor("integration.<name>.*")`.
+- **pack** -- a client-agnostic product feature. This is what a `bff/` module
+  would be, and it is what the word "plugin" means when it arrives in intake.
+
+The lock's failure mode is silent: "plugin" is ordinary, confident English, so
+"the product's plugin module" reads as fine prose while reintroducing the fourth
+kind the doc forbids. Write **pack**.
 
 ## Layout
 
@@ -18,7 +35,7 @@ tracked in memql-project#11; prefer DSL first).
   `mutations`, `shapes`, `tools`, `automations`, `logic`. The whole product
   surface. Reusable capabilities (chat/daily-space/avatar/...) are generic
   engine features you reference from DSL; only genuinely one-of-a-kind Go
-  warrants a `bff/` plugin.
+  warrants a `bff/` pack module.
 - `clients/<name>/` -- the product's client surfaces. PLURAL on purpose: a
   product may ship a landing page, an SPA and a game over one DSL. Everything
   downstream derives from the directory name (`<product>-<name>` image,
@@ -59,11 +76,22 @@ Edit `.memql` files under `dsl/__PRODUCT__/`. A pure-DSL pack can model concepts
 read/write them (queries/mutations), react to graph events (automations calling
 logic/mutations), and expose agent tools -- all with ZERO product Go. The
 `@executor("integration.<name>.*")` builtin is the ONLY construct that needs Go
-(a bff plugin); the starter deliberately avoids it. See the engine's
+(a `bff/` pack module); the starter deliberately avoids it. See the engine's
 `docs/public/language/authoring-rules.md` and `docs/public/build/building-a-pack.md`.
-Validate locally: `cd ../memql && go run ./cmd/memqllint <abs-path>/dsl/__PRODUCT__`
-(parse + import-graph integrity). A `make dev` re-mounts the bundle; no Go
-rebuild.
+
+Validate locally, and **point the linter at `dsl/`, not at one namespace**:
+
+```bash
+cd ../memql && go run ./cmd/memqllint <abs-path>/dsl
+```
+
+The DSL ROOT is the root of DOMAINS, and only there does the engine-parity tier
+run (engine memql#2520) -- the tier that catches declared-but-unused args,
+non-canonical `@relationship` types and CQS violations. Passing a single
+namespace directory runs the weaker per-domain tier and reports OK on a tree
+that will not boot. CI lints the root for exactly this reason.
+
+A `make dev` re-mounts the bundle; no Go rebuild.
 
 ## Conventions
 
@@ -81,3 +109,11 @@ rebuild.
   entry, a CI loop value or an `if env == ...` branch to stand for an
   environment; a second environment is a second instance with its own ArgoCD,
   domain and database (engine epic memql#3943).
+- **The domain is a value, and it is the CLUSTER's, not this product's.** The
+  engine cluster is seeded with one `MEMQL_DOMAIN` (`make up DOMAIN=...`), every
+  node derives its issuer / CORS origins / OAuth redirect URIs from it at boot,
+  and `deploy/k8s/base/bff.yaml` mounts that same `memql-domain` ConfigMap. So
+  `product.env`'s `DOMAIN` must MATCH the engine cluster's, and nothing here
+  pins a derived value -- an explicit `env` entry beats `envFrom` in Kubernetes
+  regardless of order, so re-pinning the issuer would mount the ConfigMap and
+  ignore it (engine memql#3593).

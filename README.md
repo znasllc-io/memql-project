@@ -70,13 +70,23 @@ product boots a full stack with zero engine-repo edits.**
    empty = local-only), `--engine-ref=...` to pin the engine, `--skip-clones`
    to skip the sibling clones, `--dry-run` to preview with zero mutation.
 
-   Leave `--domain` at its default: the local stack's identity, front door,
-   mkcert cert, and token issuer are all **engine-owned and fixed at the
-   engine's local domain** (`local.znas.io`), so a custom local domain has
-   nothing serving `identity.<domain>` (magic-link login impossible, TLS
-   mismatched, the bff rejects every token). `DOMAIN` matters for the
-   **cloud public entry**, which you set on the cloud overlay at activation
-   time (see its activation checklist) -- not per local stamp.
+   `--domain` must **match the domain the sibling engine cluster is served
+   at**. The engine no longer has a fixed local domain: `make up
+   DOMAIN=<anything>` serves whatever the operator brings, seeded as the single
+   `MEMQL_DOMAIN` key of the `memql-domain` ConfigMap that every node derives
+   its issuer, CORS origins and OAuth redirect URIs from at boot
+   (`component/envregistry/domain.go`). What is fixed is that the product's
+   local stack shares the ENGINE's identity node, so the two must agree: the
+   product's `identity.<domain>` is served by the engine Application, and a
+   mismatch means magic-link login has nothing to talk to, TLS does not match,
+   and the bff rejects every token.
+
+   Both defaults are `memql.localhost` -- an RFC 6761 loopback name that
+   belongs to nobody -- so the common case is to pass nothing on either side.
+   If you brought the engine up as `make up DOMAIN=lab.example.com`, stamp
+   with `--domain=lab.example.com`. The same value is also the **cloud public
+   entry** placeholder, which you set on the cloud overlay at activation time
+   (see its activation checklist).
 
 3. Bring up the stack (requires docker, k3d, kubectl, mkcert, and the sibling
    `../memql`):
@@ -107,23 +117,35 @@ conflicts on plumbing.
 |---|---|---|
 | `__PRODUCT__` | product name (lowercase slug) | `acme` |
 | `__PRODUCT_ORG__` | GitHub org/user owning the product repo | `acme-io` |
-| `__DOMAIN__` | engine's fixed local domain (mkcert wildcard); also the cloud public-entry placeholder | `local.znas.io` |
+| `__DOMAIN__` | the domain this cluster is served at -- matches the sibling engine cluster's; also the cloud public-entry placeholder | `memql.localhost` |
 | `__ENGINE_REF__` | engine ref pinned at stamp time (default: latest engine release tag, see below) | `0.12.1` |
 | `__REGISTRY__` | container registry for the product images | `ghcr.io/acme-io` |
 
 The engine org (`znasllc-io`) and the engine registry (`acrmemql.azurecr.io`)
 stay literal. CI greps stamped output for leftover tokens (zero tolerance).
 
-### The default engine ref is the latest release
+### The default engine ref is the newest engine TAG
 
-`init.sh` pins `ENGINE_REF` to the **latest engine release tag**, resolved over
-the network at stamp time (`resolve_latest_release_tag` reads
-`git ls-remote --tags` of `znasllc-io/memql` and sorts on a `v`-stripped key, so
-a bare `0.12.0` correctly wins over an older `v0.9.6`). The first release that
-carries the downstream contract this template needs -- `scripts/k3d/import-image.sh`,
-the k3d `up.sh` interface, and the current DSL grammar
+`init.sh` pins `ENGINE_REF` to the **newest version tag** on
+`znasllc-io/memql`, resolved over the network at stamp time
+(`resolve_latest_release_tag` reads `git ls-remote --tags` and sorts on a
+`v`-stripped key, so a bare `0.12.0` correctly wins over an older `v0.9.6`). The
+first tag carrying the downstream contract this template needs --
+`scripts/k3d/import-image.sh`, the k3d `up.sh` interface, and the current DSL
+grammar
 ([`downstream-stacks.md`](https://github.com/znasllc-io/memql/blob/main/docs/public/operate/downstream-stacks.md)
-`sinceVersion 0.12.0`) -- is `0.12.0`, so a default stamp today pins `0.12.0`.
+`sinceVersion 0.12.0`) -- is `0.12.0`; every tag since is newer, and a default
+stamp pins whichever is newest at the time you run it.
+
+> **TAGS, NOT GITHUB RELEASES -- and do not "fix" this.** The two have drifted
+> far apart on the engine: at the time of writing the newest tag is `v0.19.6`
+> while `GET /repos/znasllc-io/memql/releases/latest` still answers `v0.15.0`
+> (the engine's own `VERSION` file says `0.15.0` too). Nothing in this template
+> reads the Releases API, and that is deliberate -- swapping `git ls-remote
+> --tags` for `gh release view` or `/releases/latest` would silently pin an
+> engine four minor versions behind, and the stamp would look entirely healthy
+> while doing it. Publishing Releases for the newer tags is the engine's call,
+> not this template's.
 
 - Pass `--engine-ref=<tag>` to pin a specific ref instead.
 - Offline, resolution falls back to `main` with a loud warning; the stamp then
@@ -200,14 +222,16 @@ the engine; product-specific -> the product repo.
 
 ### Running two products locally
 
-All local products share the engine's fixed local domain (`local.znas.io`) --
-identity/TLS/issuer are engine-owned, so a per-product `--domain` is **not** the
-isolation knob (a custom local domain breaks login, see the Quickstart note).
-Isolate by cluster + Application instead, not by domain:
+Every local product in ONE cluster shares that cluster's domain, because they
+share its engine identity node -- so a per-product `--domain` is **not** the
+isolation knob within a cluster (a domain that does not match the engine's
+breaks login; see the Quickstart note). Isolate by cluster + Application:
 
 - Run one local stack at a time (simplest): `make down` one, `make up` the next.
 - Or give each its own k3d cluster and LB ports: `make up CLUSTER=acme
   EXTRA_PORTS=50051:50051` for one, `make up CLUSTER=beta EXTRA_PORTS=50052:50051`
   for the other. Each product registers its own ArgoCD Application
   (`<product>-local`), and `CLUSTER`/`EXTRA_PORTS` keep the two stacks on
-  separate clusters and host ports -- same local domain, no collision.
+  separate clusters and host ports. Two clusters may also carry two different
+  domains -- bring each engine up with its own `DOMAIN=` and stamp each product
+  to match -- but that is a second cluster, not a second overlay.

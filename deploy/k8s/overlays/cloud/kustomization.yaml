@@ -20,17 +20,19 @@
 # not patched here, because this overlay does not render identity.
 #
 # STARTER PLACEHOLDER -- FAIL CLOSED. This overlay renders coherently for the CI
-# gates but is NOT activation-ready; the single DOMAIN token defaults to the
-# engine's LOCAL domain, so an unedited render targets local.znas.io. Before
-# pointing an ArgoCD Application at this overlay, complete the ACTIVATION
-# CHECKLIST:
+# gates but is NOT activation-ready; the single DOMAIN token carries whatever the
+# stamp was given, which by default is the LOCAL loopback domain
+# (memql.localhost), so an unedited render targets a name that resolves to
+# 127.0.0.1. Before pointing an ArgoCD Application at this overlay, complete the
+# ACTIVATION CHECKLIST:
 #   1. Set REGISTRY (product.env) and replace the all-zeros image digests below
 #      with the digests the build server produced (they fail closed until then):
 #      `scripts/release/promote.sh --release=<id>` copies them in from the
 #      release lockfile.
 #   2. Set the public hostnames + domain: the app./identity./bff./mcp.
 #      __DOMAIN__ hosts and the ACME `email:` in public-entry.yaml must be this
-#      instance's real domain (NOT the local default local.znas.io).
+#      instance's real, publicly-resolvable domain -- never the local loopback
+#      default (memql.localhost), which no CA will issue a certificate for.
 #   3. Set the token issuer + CORS origin: identity-config.yaml overrides the
 #      bff's MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER to this instance's identity
 #      host and SERVER_ALLOWED_ORIGINS to its app host (https://app.<domain>).

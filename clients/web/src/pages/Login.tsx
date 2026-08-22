@@ -1,12 +1,18 @@
-// pages/Login.tsx -- the magic-link login screen + the /auth/callback handler.
+// pages/Login.tsx -- sign-in + the /auth/callback landing.
 //
-// Two modes in one route-aware component: if the URL carries a `?token=` (the
-// magic-link landing), complete the login; otherwise show the email form that
-// requests a link.
+// Two modes in one route-aware component. With `?code=` in the URL this is the
+// OAuth callback: identity has verified the emailed link on its own
+// /auth/complete and 302'd the browser back here carrying an authorization code
+// -- so exchange it. Without one, show the email form that starts the flow.
+//
+// NOTE the callback carries `code` + `state`, NOT the magic-link token itself.
+// The token never reaches this app: it is consumed by identity, which is what
+// lets the same click work whether the person is signing in to this SPA, the
+// cockpit, or the portal (see lib/auth/identity.ts for the whole shape).
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { completeLogin, requestMagicLink } from "../lib/auth/identity";
+import { completeLogin, startLogin } from "../lib/auth/identity";
 import { useSession } from "../context/Session";
 
 export default function Login() {
@@ -17,12 +23,17 @@ export default function Login() {
   const [status, setStatus] = useState<"idle" | "sending" | "sent" | "completing" | "error">("idle");
   const [error, setError] = useState("");
 
-  const linkToken = params.get("token");
+  const code = params.get("code");
+  const state = params.get("state") ?? "";
+  // The exchange spends a single-use code, so it must not run twice -- and
+  // React StrictMode deliberately runs effects twice in development.
+  const exchanged = useRef(false);
 
   useEffect(() => {
-    if (!linkToken) return;
+    if (!code || exchanged.current) return;
+    exchanged.current = true;
     setStatus("completing");
-    completeLogin(linkToken)
+    completeLogin(code, state)
       .then((session) => {
         setSession(session);
         navigate("/", { replace: true });
@@ -31,14 +42,14 @@ export default function Login() {
         setError(e instanceof Error ? e.message : String(e));
         setStatus("error");
       });
-  }, [linkToken, navigate, setSession]);
+  }, [code, state, navigate, setSession]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setStatus("sending");
     setError("");
     try {
-      await requestMagicLink(email);
+      await startLogin(email);
       setStatus("sent");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -46,11 +57,11 @@ export default function Login() {
     }
   }
 
-  if (linkToken) {
+  if (code) {
     return (
       <main className="card">
         <h1>Signing you in…</h1>
-        {status === "error" ? <p className="error">{error}</p> : <p>Completing your magic link.</p>}
+        {status === "error" ? <p className="error">{error}</p> : <p>Completing your sign-in.</p>}
       </main>
     );
   }
@@ -73,7 +84,7 @@ export default function Login() {
             />
           </label>
           <button type="submit" disabled={status === "sending"}>
-            {status === "sending" ? "Sending…" : "Send magic link"}
+            {status === "sending" ? "Sending…" : "Send sign-in link"}
           </button>
         </form>
       )}

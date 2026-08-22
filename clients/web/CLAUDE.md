@@ -15,21 +15,29 @@ everywhere** — it never composes, parses, or compares canonical `v1:` ids.
 - The ONLY place canonical ids live is `src/generated/concepts.ts` (the sdk-gen
   A3 shape; the DSL source of truth). Refer to concepts THROUGH its exports
   (`Concepts` / `CDCTopics` / `CDCFilters` / `topicFor` / `filterFor`), never a
-  hand-written literal.
+  hand-written literal. A **graph subscription takes `Concepts.X` plus CDC
+  verbs**, not a filter string — the engine composes the topic and rejects a
+  free-text filter for graph kinds (znasllc-io/memql#2460).
 - `eslint.config.js` enforces this: `v1:` literals and `.split(':')` /
   `.lastIndexOf(':')` id surgery are lint errors. Run `npm run lint`.
 - When concepts mix, key rows by `(concept, id)` via `nodeKey`, never by id alone.
 
 ## Layout
 
-- `src/lib/memql/client.ts` — the memQL client (thin local WS client in the
-  starter; swap for `@__PRODUCT_ORG__/__PRODUCT__-sdk`'s `Connection`/`QueryClient`
-  once published — see README "SDK resolution").
-- `src/lib/auth/identity.ts` — magic-link login against `https://identity.__DOMAIN__`.
+- `src/lib/memql/client.ts` — the memQL client. A thin local WS client in the
+  starter, speaking the REAL protojson `MemqlClientMessage` envelope
+  (`executeQuery` / `subscribe` / `unsubscribe`); the bridge decodes with
+  DiscardUnknown, so an invented field name is answered by silence rather than
+  an error. Swap for `@__PRODUCT_ORG__/__PRODUCT__-sdk`'s
+  `Connection`/`QueryClient` once published — see README "SDK resolution".
+- `src/lib/auth/identity.ts` — OAuth 2.1 authorization code + PKCE, fronted by a
+  magic link. Identity consumes the link and redirects to `/auth/callback?code=`.
 - `src/context/Session.tsx` — session + client provider (`useSession` / `useMemql`).
+  Dials SAME-ORIGIN by default; do not point it at `bff.<domain>` (raw gRPC in
+  the cloud entry).
 - `src/generated/concepts.ts` — generated bare-ids concept/topic constants.
-- `src/pages/` — `Login` (magic-link), `Home` (one query round-trip), `Live`
-  (one CDC subscription via generated filter constants).
+- `src/pages/` — `Login` (sign-in + the OAuth callback), `Home` (one query
+  round-trip), `Live` (one structured graph subscription).
 
 ## Common tasks
 

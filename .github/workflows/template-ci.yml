@@ -203,7 +203,7 @@ jobs:
           done
 
       - name: product bff CORS origin is concrete, never wildcard (#16)
-        # SERVER_ALLOWED_ORIGINS must never render "*" on the credentialed product
+        # MEMQL_SERVER_ALLOWED_ORIGINS must never render "*" on the credentialed product
         # bff (it carries user bearer tokens). Base renders the LOCAL front-door
         # origin (https://app.<domain>); the cloud overlay OVERRIDES it to its
         # public app host via identity-config.yaml. Assert EVERY overlay renders a
@@ -212,11 +212,11 @@ jobs:
           set -euo pipefail
           for o in local cloud; do
             kubectl kustomize "$STAMP_DIR/deploy/k8s/overlays/$o" > "/tmp/cors-$o.yaml"
-            v="$(grep -A1 'name: SERVER_ALLOWED_ORIGINS' "/tmp/cors-$o.yaml" | grep -m1 'value:' | sed 's/.*value: *//; s/"//g')"
+            v="$(grep -A1 'name: MEMQL_SERVER_ALLOWED_ORIGINS' "/tmp/cors-$o.yaml" | grep -m1 'value:' | sed 's/.*value: *//; s/"//g')"
             case "$v" in
               ""|"*") echo "ERROR: $o renders SERVER_ALLOWED_ORIGINS='$v' (want a concrete non-wildcard origin)" >&2; exit 1 ;;
             esac
-            echo "$o: SERVER_ALLOWED_ORIGINS=$v"
+            echo "$o: MEMQL_SERVER_ALLOWED_ORIGINS=$v"
           done
 
       - name: every client surface installs + typechecks + builds + lints (stamped)

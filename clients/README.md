@@ -72,12 +72,30 @@ derived, is.
 3. **Dial the origin you were served from.** A surface reaches the bff through
    the front door it was served behind, over `/memql` relative -- not a
    hardcoded cross-origin host. It removes a whole class of CORS and
-   mis-pointing bugs, and it is why the bff's `SERVER_ALLOWED_ORIGINS` can stay
-   a concrete, non-wildcard value.
-4. **Share through the SDK, not through a sibling import.** Two surfaces that
+   mis-pointing bugs, and it is why the bff's `MEMQL_SERVER_ALLOWED_ORIGINS` can
+   stay a concrete, non-wildcard value.
+
+   **Do not reach for `bff.<domain>` as "the obvious base URL".** In the cloud
+   entry that host is the RAW gRPC ingress (`backend-protocol: GRPC`, :50051)
+   for native clients like the cockpit; the WS bridge lives on `app.<domain>` at
+   `/memql`. A browser WebSocket upgrade sent to the gRPC host hands HTTP/1.1 to
+   an h2c backend and fails with a protocol error naming nothing. It appears to
+   work locally, where the front door serves the bff's HTTP surface at that
+   name -- which is what makes the mistake survive review.
+4. **Reuse the platform's rendering, do not re-implement it.**
+   `@znasllc-io/memql-view-kit` turns rows plus their `@displayCard` hints into
+   a framework-agnostic `VNode` tree, so a concept renders the day it is
+   declared with no renderer change; adapting the tree to a framework is a few
+   dozen lines (the engine's portal does it in `src/viewkit/react.ts`). Like
+   `@znasllc-io/memql-sdk-core` it publishes to GitHub Packages, so it needs a
+   `NODE_AUTH_TOKEN` -- which is exactly why the starter ships neither and hand-
+   rolls the minimum instead. Adopt both together, once the product has registry
+   credentials. Do not fork either package, and do not write per-concept
+   renderers by hand.
+5. **Share through the SDK, not through a sibling import.** Two surfaces that
    need the same typed query surface both consume the product SDK
    (`@<org>/<product>-sdk`); `clients/game` never imports from `clients/web`.
    Cross-surface imports break the per-surface image build (each surface's
    Docker context is its own directory).
-5. **One surface, one image, one digest.** A release pins every surface it
+6. **One surface, one image, one digest.** A release pins every surface it
    ships by `@sha256`. Do not fold two surfaces into one image.

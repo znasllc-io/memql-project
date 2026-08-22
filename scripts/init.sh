@@ -29,9 +29,9 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/capability.sh"
 
 cap_init "product.init" "Stamp this template checkout in place into a concrete memQL product: write product.env, rename + substitute tokens, clone engine + cockpit siblings, prune template artifacts."
-cap_spec_param "product"      "product name (required; ^[a-z][a-z0-9-]*$; e.g. 'acme')"
-cap_spec_param "product-org"  "GitHub org/user owning this product repo (required; e.g. 'acme-io')"
-cap_spec_param "domain"       "the engine's fixed local domain (leave default for local; it is also the cloud public-entry placeholder) (default: local.znas.io)"
+cap_spec_param_required "product"     "product name (^[a-z][a-z0-9-]*$; e.g. 'acme')"
+cap_spec_param_required "product-org" "GitHub org/user owning this product repo (e.g. 'acme-io')"
+cap_spec_param "domain"       "the domain this cluster is served at -- must MATCH the domain the sibling engine cluster was brought up with (engine 'make up DOMAIN=...'); also the cloud public-entry placeholder (default: memql.localhost)"
 cap_spec_param "engine-ref"   "engine ref to pin (default: the latest engine release tag, resolved at stamp time; falls back to main with a loud warning when offline)"
 cap_spec_param "registry"     "container registry for the product bundle + client-surface images (default: empty = local-only)"
 cap_spec_param "cockpit-ref"  "cockpit ref to clone (default: main)"
@@ -46,20 +46,6 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PARENT="$(cd "$ROOT/.." && pwd)"      # the workspace: engine + cockpit clone here
 ENGINE_REPO="https://github.com/znasllc-io/memql.git"
 COCKPIT_REPO="https://github.com/znasllc-io/memql-cockpit.git"
-
-# Unknown-flag allowlist. The vendored capability.sh cap_parse_flags accepts ANY
-# --flag (it only rejects positionals); this script enforces its own surface so
-# a typo'd flag fails loudly (exit 2) instead of being silently ignored. Upstream
-# fix -- making cap_parse_flags reject unknown flags against the declared spec --
-# is tracked in znasllc-io/memql#2508; drop this local check when it lands.
-CAP_KNOWN_FLAGS=" product product-org domain engine-ref registry cockpit-ref skip-clones dry-run help print-spec params-stdin "
-
-# Unknown-flag allowlist. The vendored capability.sh cap_parse_flags accepts ANY
-# --flag (it only rejects positionals); this script enforces its own surface so
-# a typo'd flag fails loudly (exit 2) instead of being silently ignored. Upstream
-# fix -- making cap_parse_flags reject unknown flags against the declared spec --
-# is tracked in znasllc-io/memql#2508; drop this local check when it lands.
-CAP_KNOWN_FLAGS=" product product-org domain engine-ref registry cockpit-ref skip-clones dry-run help print-spec params-stdin "
 
 # Operational files init must NEVER touch (byte-identical template<->product, so
 # `git merge template/main` stays clean). Paths are relative to ROOT; a trailing
@@ -101,22 +87,6 @@ CAP_STAMP_PATHS=(
 #=============================================================================
 # FUNCTIONS
 #=============================================================================
-
-# reject_unknown_flags "$@" -- exit 2 on any --flag not in CAP_KNOWN_FLAGS.
-function reject_unknown_flags() {
-    local a name
-    for a in "$@"; do
-        case "$a" in
-            --*=*) name="${a%%=*}"; name="${name#--}" ;;
-            --*)   name="${a#--}" ;;
-            *)     cap_fail 2 "unexpected positional argument: $a" ;;
-        esac
-        case "$CAP_KNOWN_FLAGS" in
-            *" $name "*) ;;
-            *) cap_fail 2 "unknown flag: --$name (see --help; local allowlist per znasllc-io/memql#2508)" ;;
-        esac
-    done
-}
 
 function require_prerequisites() {
     command -v git >/dev/null 2>&1 || cap_fail 4 "git is not installed"
@@ -556,12 +526,16 @@ function emit_result() {
 
 function main() {
     cap_handle_meta "$@"
-    reject_unknown_flags "$@"
     cap_parse_flags "$@"
 
     PRODUCT="$(cap_param product "")"
     PRODUCT_ORG="$(cap_param product-org "")"
-    DOMAIN="$(cap_param domain "local.znas.io")"
+    # Default: the engine's own local default (scripts/k3d/up.sh
+    # OVERLAY_DEFAULT_DOMAIN). memql.localhost is an RFC 6761 loopback name that
+    # belongs to nobody, which is the point -- no company's domain is baked into
+    # a template (memql#3593, memql#4217). A product serving a real domain passes
+    # it as --domain and it lives in THIS repo's product.env, never upstream.
+    DOMAIN="$(cap_param domain "memql.localhost")"
     ENGINE_REF="$(cap_param engine-ref "")"
     REGISTRY_VALUE="$(cap_param registry "")"
     COCKPIT_REF="$(cap_param cockpit-ref "main")"

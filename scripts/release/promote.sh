@@ -39,36 +39,13 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/capability.sh"
 
 cap_init "release.promote" "Pin an overlay's product images from a release lockfile (digest copy, no rebuild)."
-cap_spec_param "release"  "release id -- reads deploy/releases/<release>.yaml (required)"
+cap_spec_param_required "release" "release id -- reads deploy/releases/<release>.yaml"
 cap_spec_param "overlay"  "digest-pinned overlay to pin: a directory name under deploy/k8s/overlays/ (default: cloud; local is refused)"
 cap_spec_param "lockfile" "explicit lockfile path (default: deploy/releases/<release>.yaml)"
 cap_spec_param "dry-run"  "print the rewritten overlay to stderr; do not write (flag)"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Unknown-flag allowlist, the same local guard scripts/init.sh carries: the
-# vendored cap_parse_flags accepts ANY --flag (it only rejects positionals), so
-# without this a retired flag such as --to-env would be silently ignored and
-# the cloud overlay pinned as if nothing were wrong. Exit 2 instead. Upstream
-# fix tracked in znasllc-io/memql#2508; drop this when it lands.
-CAP_KNOWN_FLAGS=" release overlay lockfile dry-run help print-spec params-stdin "
-
-# reject_unknown_flags "$@" -- exit 2 on any --flag not in CAP_KNOWN_FLAGS.
-function reject_unknown_flags() {
-    local a name
-    for a in "$@"; do
-        case "$a" in
-            --*=*) name="${a%%=*}"; name="${name#--}" ;;
-            --*)   name="${a#--}" ;;
-            *)     cap_fail 2 "unexpected positional argument: $a" ;;
-        esac
-        case "$CAP_KNOWN_FLAGS" in
-            *" $name "*) ;;
-            *) cap_fail 2 "unknown flag: --$name (see --help; the environment axis is gone, so there is no --to-env)" ;;
-        esac
-    done
-}
 
 # lock_scalar / lock_comp -- read the simple, fixed-shape lockfile (see
 # assemble-lockfile.sh); kept standalone so promote.sh needs no shared lib.
@@ -127,7 +104,6 @@ function rewrite_one() {
 
 function main() {
     cap_handle_meta "$@"
-    reject_unknown_flags "$@"
     cap_parse_flags "$@"
 
     if [ -f "$REPO_ROOT/product.env" ]; then

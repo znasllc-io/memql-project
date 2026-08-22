@@ -1,6 +1,6 @@
 # __PRODUCT__ front door on the local k3d cluster. traefik terminates TLS on
-# 443 with the operator's mkcert wildcard (local-znas-tls, seeded engine-side by
-# `make -C ../memql up`) and routes by hostname:
+# 443 with the operator's mkcert wildcard (memql-front-door-tls, seeded
+# engine-side by `make -C ../memql up`) and routes by hostname:
 #   https://bff.__DOMAIN__  -> the product bff's HTTP surface (the /memql/ws
 #                              bridge the SPA consumes).
 #   https://app.__DOMAIN__  -> the in-cluster `web` client surface, with the same
@@ -20,7 +20,7 @@ metadata:
 spec:
   tls:
     - hosts: ["bff.__DOMAIN__"]
-      secretName: local-znas-tls
+      secretName: memql-front-door-tls
   rules:
     - host: bff.__DOMAIN__
       http:
@@ -37,18 +37,32 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: app-front-door
+  # NO router.priority here, deliberately. traefik's default priority is derived
+  # from rule LENGTH, which is what makes each of these exact-host rules outrank
+  # a shorter wildcard. A uniform priority on an Ingress that declares several
+  # paths flattens them against each other and the longest-prefix match stops
+  # working (the engine measured this in memql#3810). Do not "fix" this by
+  # adding one.
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
 spec:
   tls:
     - hosts: ["app.__DOMAIN__"]
-      secretName: local-znas-tls
+      secretName: memql-front-door-tls
   rules:
     - host: app.__DOMAIN__
       http:
         paths:
           - { path: /memql/audio, pathType: Prefix, backend: { service: { name: voice, port: { number: 8085 } } } }
           - { path: /memql, pathType: Prefix, backend: { service: { name: bff-__PRODUCT__, port: { number: 8085 } } } }
+          # Authenticated bff HTTP routes that appear in NO PublicPaths-style
+          # aggregate and so are easy to leave unrouted -- which is the failure
+          # the engine's cmd/frontdoorpaths generator exists to prevent. Keep
+          # this list in step with that generator's output for the paths a
+          # product head actually serves.
+          - { path: /spaces/, pathType: Prefix, backend: { service: { name: bff-__PRODUCT__, port: { number: 8085 } } } }
+          - { path: /polyphon/room-token, pathType: Prefix, backend: { service: { name: bff-__PRODUCT__, port: { number: 8085 } } } }
+          - { path: /polyphon/status, pathType: Prefix, backend: { service: { name: bff-__PRODUCT__, port: { number: 8085 } } } }
           - { path: /auth/refresh, pathType: Prefix, backend: { service: { name: identity, port: { number: 8085 } } } }
           - { path: /auth/logout, pathType: Prefix, backend: { service: { name: identity, port: { number: 8085 } } } }
           - { path: /oauth/token, pathType: Prefix, backend: { service: { name: identity, port: { number: 8085 } } } }

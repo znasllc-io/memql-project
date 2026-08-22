@@ -8,8 +8,12 @@ import { createContext, useContext, useMemo, useState, type ReactNode } from "re
 import { MemqlClient } from "../lib/memql/client";
 import { loadSession, logout as clearSession, type Session } from "../lib/auth/identity";
 
-const BFF_HTTP_URL: string =
-  (import.meta.env.VITE_MEMQL_HTTP_URL as string | undefined) ?? "https://bff.__DOMAIN__";
+// SAME ORIGIN BY DEFAULT. Empty means "dial the origin this bundle was served
+// from" -- the front door that serves the SPA also routes /memql to the product
+// bff, in dev via the Vite proxy and in a cluster via the app.<domain> Ingress.
+// Naming bff.<domain> here would work locally and break in the cloud, where
+// that host is the RAW gRPC ingress (see MemqlClientOptions.httpUrl).
+const BFF_HTTP_URL: string = (import.meta.env.VITE_MEMQL_HTTP_URL as string | undefined) ?? "";
 
 interface SessionContextValue {
   session: Session | null;
