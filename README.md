@@ -124,16 +124,28 @@ conflicts on plumbing.
 The engine org (`znasllc-io`) and the engine registry (`acrmemql.azurecr.io`)
 stay literal. CI greps stamped output for leftover tokens (zero tolerance).
 
-### The default engine ref is the latest release
+### The default engine ref is the newest engine TAG
 
-`init.sh` pins `ENGINE_REF` to the **latest engine release tag**, resolved over
-the network at stamp time (`resolve_latest_release_tag` reads
-`git ls-remote --tags` of `znasllc-io/memql` and sorts on a `v`-stripped key, so
-a bare `0.12.0` correctly wins over an older `v0.9.6`). The first release that
-carries the downstream contract this template needs -- `scripts/k3d/import-image.sh`,
-the k3d `up.sh` interface, and the current DSL grammar
+`init.sh` pins `ENGINE_REF` to the **newest version tag** on
+`znasllc-io/memql`, resolved over the network at stamp time
+(`resolve_latest_release_tag` reads `git ls-remote --tags` and sorts on a
+`v`-stripped key, so a bare `0.12.0` correctly wins over an older `v0.9.6`). The
+first tag carrying the downstream contract this template needs --
+`scripts/k3d/import-image.sh`, the k3d `up.sh` interface, and the current DSL
+grammar
 ([`downstream-stacks.md`](https://github.com/znasllc-io/memql/blob/main/docs/public/operate/downstream-stacks.md)
-`sinceVersion 0.12.0`) -- is `0.12.0`, so a default stamp today pins `0.12.0`.
+`sinceVersion 0.12.0`) -- is `0.12.0`; every tag since is newer, and a default
+stamp pins whichever is newest at the time you run it.
+
+> **TAGS, NOT GITHUB RELEASES -- and do not "fix" this.** The two have drifted
+> far apart on the engine: at the time of writing the newest tag is `v0.19.6`
+> while `GET /repos/znasllc-io/memql/releases/latest` still answers `v0.15.0`
+> (the engine's own `VERSION` file says `0.15.0` too). Nothing in this template
+> reads the Releases API, and that is deliberate -- swapping `git ls-remote
+> --tags` for `gh release view` or `/releases/latest` would silently pin an
+> engine four minor versions behind, and the stamp would look entirely healthy
+> while doing it. Publishing Releases for the newer tags is the engine's call,
+> not this template's.
 
 - Pass `--engine-ref=<tag>` to pin a specific ref instead.
 - Offline, resolution falls back to `main` with a loud warning; the stamp then
