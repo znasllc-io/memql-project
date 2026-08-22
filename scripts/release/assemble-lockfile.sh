@@ -27,9 +27,9 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/capability.sh"
 
 cap_init "release.assemble-lockfile" "Write deploy/releases/<release>.yaml pinning the product images by digest."
-cap_spec_param "release"       "release id / immutable tag (required)"
-cap_spec_param "bundle-digest" "sha256:<64hex> digest of the DSL-bundle image (required)"
-cap_spec_param "client-digests" "comma-separated <surface>=sha256:<64hex> list, one per client surface, e.g. 'web=sha256:aa..,game=sha256:bb..' (required)"
+cap_spec_param_required "release"        "release id / immutable tag"
+cap_spec_param_required "bundle-digest" "sha256:<64hex> digest of the DSL-bundle image"
+cap_spec_param_required "client-digests" "comma-separated <surface>=sha256:<64hex> list, one per client surface, e.g. 'web=sha256:aa..,game=sha256:bb..'"
 cap_spec_param "engine-ref"    "engine ref this release ships against (default: ENGINE_REF from product.env)"
 cap_spec_param "registry"      "registry host/path (default: REGISTRY from product.env)"
 cap_spec_param "out"           "output path (default: deploy/releases/<release>.yaml)"

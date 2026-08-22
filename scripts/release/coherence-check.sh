@@ -23,7 +23,7 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/capability.sh"
 
 cap_init "release.coherence-check" "Validate a release lockfile: product components present + digest-pinned (+ overlay match)."
-cap_spec_param "lockfile" "path to the release lockfile (required)"
+cap_spec_param_required "lockfile" "path to the release lockfile"
 cap_spec_param "overlay"  "also assert this overlay's product images match the lockfile (a digest-pinned overlay directory name under deploy/k8s/overlays/, e.g. cloud; never local)"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
