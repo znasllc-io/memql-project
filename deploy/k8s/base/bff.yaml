@@ -66,9 +66,31 @@ spec:
                 name: memql-secrets
             - configMapRef:
                 name: memql-db-pool
+            # THE DOMAIN ARRIVES HERE, NOT AS A PINNED VALUE (engine memql#3593).
+            # memql-domain carries exactly one key, MEMQL_DOMAIN, seeded by the
+            # ENGINE cluster's `make up DOMAIN=...` / `make secrets`. Every node
+            # derives its identity base URL, the issuer it verifies against, the
+            # discovery endpoint and the OAuth redirect URIs from it at boot
+            # (component/envregistry/domain.go), so the product head and the
+            # engine mesh cannot disagree about the domain -- which is the
+            # failure this replaces: a stamped-once issuer that silently stops
+            # matching the moment the engine cluster is re-seeded with a
+            # different domain, and then rejects every token while this manifest
+            # still looks correct.
+            #
+            # NOT `optional: true`, matching the engine: a node with no domain
+            # would derive nothing, boot, join the mesh and reject every token
+            # with an error naming neither the domain nor this ConfigMap.
+            # Refusing to start is the honest failure. Same hard dependency on
+            # the engine cluster that memql-secrets above already is.
+            - configMapRef:
+                name: memql-domain
           env:
-            - { name: MEMQL_GENESIS_AUTOLOAD, value: "true" }
-            - { name: SERVICE_NAME, value: "memQL" }
+            # Env names carry the MEMQL_ prefix (engine memql#3892). The bare
+            # SERVER_* / SERVICE_* spellings still work through the boot alias
+            # shim (component/envregistry.ApplyLegacyEnvAliases) but log a
+            # deprecation line on every node at every boot.
+            - { name: MEMQL_SERVICE_NAME, value: "MemQL" }
             - { name: MEMQL_NODE_TYPE, value: "bff" }
             - { name: MEMQL_NODE_ADDRESS, value: "bff-__PRODUCT__:50058" }
             # Unique per-pod mesh identity: overrides the shared genesis
@@ -79,18 +101,15 @@ spec:
             # Reach the shared engine leaf nodes (owned by the engine Application).
             - { name: MEMQL_WORKER_PEERS, value: "voice=voice:50059,agent=agent:50055,cognition=cognition:50054,planner=planner:50056,workbench=workbench:50060" }
             - { name: MEMQL_GRPC_ADDRESS, value: ":50051" }
-            - { name: SERVER_ADDRESS, value: "0.0.0.0:8085" }
+            - { name: MEMQL_SERVER_ADDRESS, value: "0.0.0.0:8085" }
             - { name: MEMQL_IDENTITY_VERIFIER_BASE_URL, value: "https://identity:8085" }
             - { name: MEMQL_IDENTITY_VERIFIER_AUDIENCE, value: "memql" }
-            # Expected issuer. The base value is the issuer for the domain this
-            # product was stamped with -- which MATCHES the domain the sibling
-            # engine cluster is served at (product.env DOMAIN; the engine's own
-            # default is memql.localhost), so it resolves to the same issuer the
-            # engine's mesh verifies against. The cloud overlay renders its own
-            # public identity host and so OVERRIDES this via its
-            # identity-config.yaml patch (a per-target patch point; see the
-            # overlay activation checklist).
-            - { name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER, value: "https://identity.__DOMAIN__" }
+            # NO MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER HERE, DELIBERATELY. It is
+            # derived from the memql-domain ConfigMap above, and an explicit `env`
+            # entry BEATS `envFrom` in Kubernetes regardless of order -- so pinning
+            # it would mount the ConfigMap and ignore it. The engine gates exactly
+            # this on its own nodes (deploy/k8s/overlays/local/render_domain_test.go:
+            # "still pins an expected issuer, which beats envFrom").
             # Authentication is ON everywhere, local and cloud alike -- env
             # parity (the engine's own engine-bff component sets "true" even
             # locally). The product bff is exposed by the cloud public-entry
@@ -99,41 +118,34 @@ spec:
             - { name: MEMQL_IDENTITY_ENABLED, value: "true" }
             - { name: MEMQL_HTTP_TLS_CA_FILE, value: "/etc/memql/cacerts/ca.crt" }
             - { name: SSL_CERT_DIR, value: "/etc/ssl/certs:/etc/memql/cacerts" }
-            # CORS allow-list for the product bff's HTTP/WS surface. NEVER "*": the
-            # bff is a CREDENTIALED API (it carries user bearer tokens), so a
-            # wildcard origin lets any site drive it with the user's session. The
-            # base value is the front-door origin for the stamped domain
+            # CORS allow-list for the product bff's HTTP/WS surface, and the ONE
+            # domain-shaped value that is NOT derived from memql-domain -- the
+            # derivation covers the identity/discovery/redirect set, not this.
+            #
+            # NEVER "*": the CORS middleware emits
+            # `Access-Control-Allow-Credentials: true` ONLY when the allow-list is
+            # explicit, and degrades to a credential-less posture under a wildcard
+            # (component/server/nethttp.go). The bff is a CREDENTIALED API -- it
+            # carries user bearer tokens -- so a wildcard here does not open it up,
+            # it breaks it: every credentialed request from the SPA fails. Name the
+            # origin.
+            #
+            # The base value is the front-door origin for the stamped domain
             # (app.DOMAIN, from product.env). The cloud overlay serves the SPA at
             # its own public host and so OVERRIDES this via its
-            # identity-config.yaml patch -- the same per-target patch point as the
-            # issuer above (see the overlay activation checklist).
-            - { name: SERVER_ALLOWED_ORIGINS, value: "https://app.__DOMAIN__" }
-            # The memQL Portal is DELIBERATELY NOT SERVED by the product bff.
+            # identity-config.yaml patch (see the overlay activation checklist).
+            - { name: MEMQL_SERVER_ALLOWED_ORIGINS, value: "https://app.__DOMAIN__" }
+            # The memQL Portal is DELIBERATELY NOT SERVED by the product bff,
+            # and there is no longer an env var that could make it be.
             #
             # The portal is the PLATFORM's operations console, not a product
-            # surface. Operators reach it through the engine Application's own
-            # neutral bff, whose engine-bff component sets
-            # MEMQL_PORTAL_DIST=/app/portal. Leaving it unset here is a choice,
-            # not an oversight.
-            #
-            # To serve it from THIS head anyway, two things must both be true:
-            #   1. the image actually carries the bundle. It is never
-            #      //go:embed'ed, and the engine Dockerfile's PORTAL_DIST_STAGE
-            #      defaults to `portal-skip` (an empty directory), so /app/portal
-            #      is EMPTY unless the image was built with
-            #      `--build-arg PORTAL_DIST_STAGE=portal-build`. A missing bundle
-            #      does not fail boot -- the handler answers 404 with an
-            #      actionable message, which is the confusing half-state to avoid.
-            #   2. this env var names that directory:
-            #        - { name: MEMQL_PORTAL_DIST, value: "/app/portal" }
-            #
-            # Before enabling it, weigh the exposure: GET /portal/* is in the
-            # engine's PUBLIC path set (static bytes, identical for every visitor
-            # -- a browser must fetch the bundle before any application code
-            # exists to authenticate), and this head is published to the internet
-            # by the cloud public entry (app.DOMAIN + bff.DOMAIN). The DATA the
-            # portal reads stays gated on the /memql/ws stream it then dials, but
-            # the console itself becomes publicly reachable.
+            # surface. Since engine memql#3711 it is site #1: an ordinary hosted
+            # site served by the engine's `edge` node at portal.<domain>, resolved
+            # by hostname to a v1:platform:site row whose bundleRef names the
+            # directory the bytes live in. component/portal is retired and
+            # MEMQL_PORTAL_DIST with it, so there is nothing to set here -- the
+            # engine Application owns the edge node, the site row and the
+            # portal front-door rule.
             # Shared DB -- migrations run once on the engine identity node.
             - { name: MEMORY_NODES_DATABASE_MIGRATE_ON_START, value: "false" }
           volumeMounts:
