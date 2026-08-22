@@ -127,7 +127,7 @@ section.
 The ONLY construct that needs Go is a builtin bound to
 `@executor("integration.<name>.<cap>")` (an external call: HTTP, shell). The
 starter deliberately avoids it -- if you need one, that is bespoke Go (a thin
-`bff/` plugin), tracked in
+`bff/` **pack** module), tracked in
 [memql-project#11](https://github.com/znasllc-io/memql-project/issues/11).
 Prefer DSL first.
 

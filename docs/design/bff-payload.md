@@ -2,11 +2,16 @@
 
 **Status:** design only -- no implementation until a product actually needs
 bespoke Go.
+**Vocabulary:** the thing described here is a **pack** -- one of memQL's three
+extension words (component / integration / pack; engine memql#4135). Where
+`Plugin` still appears below it is a Go IDENTIFIER (`RegisterPluginForContract`,
+`PluginContext`, `PluginFactory`, `plugin.go`), which the engine's own
+vocabulary gate exempts as a proper name. In prose it is a pack module.
 **Tracks:** [memql-project#11](https://github.com/znasllc-io/memql-project/issues/11)
 (design backlog under the Step-5 consolidation epic).
 **Decision basis:** [memql#2472](https://github.com/znasllc-io/memql/issues/2472)
 decision 2 -- product Go is absorbed into the engine as generic features; only
-truly bespoke, one-of-a-kind Go survives, as a thin bff plugin.
+truly bespoke, one-of-a-kind Go survives, as a thin bff **pack** module.
 
 This document specifies the payload a product adds **only when it first needs
 client-specific Go**, and how that payload composes with the stamped product
@@ -48,7 +53,7 @@ operational cost. Exhaust these first, in order:
    new builtin family), it belongs in the **engine** as a generic feature, not in
    your repo. This is the standing change-routing rule: "would a second product
    want this? -> the engine." Open an engine issue for the missing seam.
-3. **Only then, a `bff/` plugin.** Reach here **only** for Go that is genuinely
+3. **Only then, a `bff/` pack module.** Reach here **only** for Go that is genuinely
    one-of-a-kind to this one product and cannot be expressed in DSL: a bespoke
    external-protocol adapter, a client-specific algorithm with no general form, a
    proprietary integration that would never be upstreamed.
@@ -62,7 +67,7 @@ capability, you have found the escape hatch's use case.
 get the capability upstreamed. If that issue is coherent ("memQL should ship an
 X integration"), do that instead. If the issue reads as "memQL should ship
 $CLIENT's proprietary X" -- i.e. no second product wants it -- the `bff/`
-plugin is correct.
+a pack module is correct.
 
 ---
 
@@ -72,7 +77,7 @@ The payload is an **optional Go module** added under `bff/` by
 `init.sh --go-module`. It is deliberately thin: every line of general service
 behavior stays in the engine; the module adds only this product's
 `IntegrationProvider` and wraps the engine's own `app.Run` lifecycle so the
-product bff boots exactly like the neutral engine bff, plus the product plugin.
+product bff boots exactly like the neutral engine bff, plus the product pack.
 
 ```
 <product>/                         THIS repo (stamped)
@@ -93,16 +98,16 @@ product bff boots exactly like the neutral engine bff, plus the product plugin.
 
 The product bff binary is the engine's default (`bff`, no build tag) entrypoint
 with **one** addition: a blank import of the product integrations package, whose
-`init()` registers the plugin. Everything else -- genesis autoload, `.env`
-override, legacy-env aliasing, `app.Run` with the graceful-shutdown and health
-wiring -- is copied from the engine's own `main.go` so the product bff has
-byte-for-byte the same lifecycle.
+`init()` registers the pack. Everything else -- the `.env` override, legacy-env
+aliasing, the domain derivations, `app.Run` with the graceful-shutdown and
+health wiring -- is copied from the engine's own `main.go` so the product bff
+has byte-for-byte the same lifecycle.
 
 ```go
 package main
 
 import (
-	// ... the same imports the engine main.go uses (app, genesis, server,
+	// ... the same imports the engine main.go uses (app, envregistry, server,
 	// service, common, logger) ...
 
 	// Blank import: the product pack registers from init(). This is the ONLY
@@ -112,10 +117,18 @@ import (
 
 func main() {
 	// byte-for-byte the current engine main.go body:
-	//   genesis.AutoloadFromEnv() -> genesis.ApplyLocalOverride(".")
-	//   -> genesis.ApplyLegacyEnvAliases() -> app.Run(app.RunConfig{ ... })
+	//   envregistry.ApplyLocalOverride(".") -> envregistry.ApplyLegacyEnvAliases()
+	//   -> envregistry.ApplyDomainDerivations() -> app.Run(app.RunConfig{ ... })
 }
 ```
+
+> **The package is `component/envregistry`, not `genesis`, and one of the calls
+> this document used to name is gone.** `component/genesis` was renamed in
+> engine memql#3963, and the sealed-envelope half it shared a directory with was
+> retired in epic memql#3958 -- so `genesis.AutoloadFromEnv()` has no successor,
+> not a new name. `ApplyDomainDerivations` is the addition that replaced what it
+> did for the domain: the cluster's single `MEMQL_DOMAIN` derives the identity
+> base URL, issuer, discovery endpoint and OAuth redirect URIs, set-if-absent.
 
 The product DSL still loads at runtime: `app.Run` -> `app/database.go` calls
 `dsl.MountRuntimeDomainsFromEnv`, which mounts the bundle at `MEMQL_DSL_PATH`.
@@ -440,12 +453,12 @@ Inert for no-Go products.
 
 ### 5.4 Optional: a DB-tests lane
 
-If a product's bff plugin has DB-backed behavior, the archived carrier `ci.yml`'s
+If a product's bff pack has DB-backed behavior, the archived carrier `ci.yml`'s
 `db-tests` job is the salvage shape: a `timescaledb:latest-pg16` service, the
 extension-seeding step (`timescaledb`, `uuid-ossp`, `pgcrypto`, `vector`), and
 `go test ./integrations/<product>/...` under
 `MEMQL_DATABASE_DSN=postgres://...`. This is **not** in the default lane -- add it
-per product only when the plugin needs Postgres. If it is added to the template
+per product only when the pack needs Postgres. If it is added to the template
 `ci.yml`, it must also be `bff/**`-path-filtered and skip without `bff/`.
 
 ---
