@@ -31,7 +31,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/capability.sh"
 cap_init "product.init" "Stamp this template checkout in place into a concrete memQL product: write product.env, rename + substitute tokens, clone engine + cockpit siblings, prune template artifacts."
 cap_spec_param "product"      "product name (required; ^[a-z][a-z0-9-]*$; e.g. 'acme')"
 cap_spec_param "product-org"  "GitHub org/user owning this product repo (required; e.g. 'acme-io')"
-cap_spec_param "domain"       "the engine's fixed local domain (leave default for local; it is also the cloud public-entry placeholder) (default: local.znas.io)"
+cap_spec_param "domain"       "the domain this cluster is served at -- must MATCH the domain the sibling engine cluster was brought up with (engine 'make up DOMAIN=...'); also the cloud public-entry placeholder (default: memql.localhost)"
 cap_spec_param "engine-ref"   "engine ref to pin (default: the latest engine release tag, resolved at stamp time; falls back to main with a loud warning when offline)"
 cap_spec_param "registry"     "container registry for the product bundle + client-surface images (default: empty = local-only)"
 cap_spec_param "cockpit-ref"  "cockpit ref to clone (default: main)"
@@ -561,7 +561,12 @@ function main() {
 
     PRODUCT="$(cap_param product "")"
     PRODUCT_ORG="$(cap_param product-org "")"
-    DOMAIN="$(cap_param domain "local.znas.io")"
+    # Default: the engine's own local default (scripts/k3d/up.sh
+    # OVERLAY_DEFAULT_DOMAIN). memql.localhost is an RFC 6761 loopback name that
+    # belongs to nobody, which is the point -- no company's domain is baked into
+    # a template (memql#3593, memql#4217). A product serving a real domain passes
+    # it as --domain and it lives in THIS repo's product.env, never upstream.
+    DOMAIN="$(cap_param domain "memql.localhost")"
     ENGINE_REF="$(cap_param engine-ref "")"
     REGISTRY_VALUE="$(cap_param registry "")"
     COCKPIT_REF="$(cap_param cockpit-ref "main")"

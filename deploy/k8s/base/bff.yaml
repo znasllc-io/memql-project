@@ -82,12 +82,14 @@ spec:
             - { name: SERVER_ADDRESS, value: "0.0.0.0:8085" }
             - { name: MEMQL_IDENTITY_VERIFIER_BASE_URL, value: "https://identity:8085" }
             - { name: MEMQL_IDENTITY_VERIFIER_AUDIENCE, value: "memql" }
-            # Expected issuer. The base value is the LOCAL issuer -- for a local
-            # stack DOMAIN is the engine's fixed local domain (local.znas.io), so
-            # this resolves to the same issuer the engine's local mesh verifies
-            # against. The cloud overlay renders its own public identity host and
-            # so OVERRIDES this via its identity-config.yaml patch (a per-target
-            # patch point; see the overlay activation checklist).
+            # Expected issuer. The base value is the issuer for the domain this
+            # product was stamped with -- which MATCHES the domain the sibling
+            # engine cluster is served at (product.env DOMAIN; the engine's own
+            # default is memql.localhost), so it resolves to the same issuer the
+            # engine's mesh verifies against. The cloud overlay renders its own
+            # public identity host and so OVERRIDES this via its
+            # identity-config.yaml patch (a per-target patch point; see the
+            # overlay activation checklist).
             - { name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER, value: "https://identity.__DOMAIN__" }
             # Authentication is ON everywhere, local and cloud alike -- env
             # parity (the engine's own engine-bff component sets "true" even
@@ -100,8 +102,8 @@ spec:
             # CORS allow-list for the product bff's HTTP/WS surface. NEVER "*": the
             # bff is a CREDENTIALED API (it carries user bearer tokens), so a
             # wildcard origin lets any site drive it with the user's session. The
-            # base value is the LOCAL front-door origin (app.DOMAIN, where DOMAIN is
-            # the engine's fixed local domain). The cloud overlay serves the SPA at
+            # base value is the front-door origin for the stamped domain
+            # (app.DOMAIN, from product.env). The cloud overlay serves the SPA at
             # its own public host and so OVERRIDES this via its
             # identity-config.yaml patch -- the same per-target patch point as the
             # issuer above (see the overlay activation checklist).
