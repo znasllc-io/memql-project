@@ -22,9 +22,21 @@
 // split an id on ':'. The bare-ids ESLint contract (eslint.config.js) enforces
 // that and excludes this generated module.
 
+// SEEDED SET: only concepts the ENGINE actually declares, plus this pack's own.
+// `v1:cognition:space` used to be listed here and is NOT an engine concept --
+// spaces are product-owned, delivered through a product's own DSL bundle at
+// MEMQL_DSL_PATH, so a hand-seeded core entry for one was wrong. Regenerating
+// against the engine is what keeps this honest.
+//
+// CDCFilters / CDCTopics ARE still emitted by sdk-gen, but a graph subscription
+// no longer takes a filter STRING: the engine composes the bus topic from
+// concept + actions and rejects a free-text filter for graph kinds
+// (znasllc-io/memql#2460). Pass `Concepts.X` to MemqlClient.subscribeGraph;
+// these two maps remain useful for logging, display, and the non-graph
+// subscription kinds.
+
 /** Canonical concept ids, keyed by SCREAMING_SNAKE of <namespace>_<concept>. */
 export const Concepts = {
-  COGNITION_SPACE: "v1:cognition:space",
   COGNITION_PARTICIPANT: "v1:cognition:participant",
   IDENTITY_USER: "v1:identity:user",
   __PRODUCT_ID___GREETING: "v1:__PRODUCT_ID__:greeting",
@@ -40,9 +52,6 @@ export const BoundConcepts = {
 
 /** Full emitted CDC topics: graph.node.<action>.<concept>. */
 export const CDCTopics = {
-  COGNITION_SPACE_CREATED: "graph.node.created.v1:cognition:space",
-  COGNITION_SPACE_UPDATED: "graph.node.updated.v1:cognition:space",
-  COGNITION_SPACE_DELETED: "graph.node.deleted.v1:cognition:space",
   __PRODUCT_ID___GREETING_CREATED: "graph.node.created.v1:__PRODUCT_ID__:greeting",
   __PRODUCT_ID___GREETING_UPDATED: "graph.node.updated.v1:__PRODUCT_ID__:greeting",
   __PRODUCT_ID___GREETING_DELETED: "graph.node.deleted.v1:__PRODUCT_ID__:greeting",
@@ -50,9 +59,6 @@ export const CDCTopics = {
 
 /** Subscription filters: node.<action>.<concept> (the backend prepends `graph.`). */
 export const CDCFilters = {
-  COGNITION_SPACE_CREATED: "node.created.v1:cognition:space",
-  COGNITION_SPACE_UPDATED: "node.updated.v1:cognition:space",
-  COGNITION_SPACE_DELETED: "node.deleted.v1:cognition:space",
   __PRODUCT_ID___GREETING_CREATED: "node.created.v1:__PRODUCT_ID__:greeting",
   __PRODUCT_ID___GREETING_UPDATED: "node.updated.v1:__PRODUCT_ID__:greeting",
   __PRODUCT_ID___GREETING_DELETED: "node.deleted.v1:__PRODUCT_ID__:greeting",

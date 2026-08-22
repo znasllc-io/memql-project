@@ -15,14 +15,19 @@ the engine is the sibling checkout `../../../memql`.
 
 A lean-but-real starting point (grow it into the product):
 
-- **Identity login** — magic-link against `https://identity.__DOMAIN__`
-  (`src/lib/auth/identity.ts`), a session context (`src/context/Session.tsx`),
-  and a protected-route guard (`src/App.tsx`).
-- **One typed query round-trip** — `src/pages/Home.tsx` calls a named query
-  function over the memQL client and renders bare-id rows.
-- **One subscription example** — `src/pages/Live.tsx` subscribes to a concept's
-  CDC stream using **generated topic constants** (`src/generated/concepts.ts`),
-  never a hand-written `graph.node…` / `v1:` string.
+- **Identity login** — a magic link on the front of an **OAuth 2.1
+  authorization-code flow with PKCE** (`src/lib/auth/identity.ts`), a session
+  context (`src/context/Session.tsx`), and a protected-route guard
+  (`src/App.tsx`). The emailed link is consumed by *identity*, which redirects
+  back to `/auth/callback?code=&state=`; the app exchanges that code at
+  `/oauth/token`. The magic-link token itself never reaches this app.
+- **One typed query round-trip** — `src/pages/Home.tsx` calls the pack's own
+  owned read (`myGreetings`) over the memQL client and renders bare-id rows.
+- **One subscription example** — `src/pages/Live.tsx` opens a **structured**
+  graph subscription naming a **generated concept id**
+  (`src/generated/concepts.ts`) plus the CDC verbs it wants. The engine composes
+  the bus topic; a free-text filter string is rejected for graph subscriptions
+  (znasllc-io/memql#2460), so there is no `graph.node…` / `v1:` string to write.
 - **The bare-ids contract, enforced** — `eslint.config.js` bans `v1:`-prefixed
   id literals and `.split(':')` / `.lastIndexOf(':')` id surgery. Rows that mix
   concepts are keyed by `(concept, id)` (`nodeKey`), never by id alone.
@@ -58,10 +63,13 @@ no dependency on an unpublished package**.
 2. Export `NODE_AUTH_TOKEN` (a GitHub token with `read:packages` for the
    `@__PRODUCT_ORG__` + `@znasllc-io` scopes — `.npmrc` points both there).
 3. Replace `src/lib/memql/client.ts` with the SDK's `Connection` / `QueryClient`
-   and import the concept/topic constants from `@__PRODUCT_ORG__/__PRODUCT__-sdk`
-   instead of `src/generated/concepts.ts`. The wire shape (bare-id args → bare-id
-   rows; `topicFor` / `filterFor` for subscriptions) is identical, so the swap is
-   mechanical.
+   / `SubscriptionManager` and import the concept constants from
+   `@__PRODUCT_ORG__/__PRODUCT__-sdk` instead of `src/generated/concepts.ts`.
+   The starter shim is deliberately shaped like those primitives — a MemQL call
+   string built from typed args, `subscribeGraph(concept, actions)` for CDC — so
+   the swap is mechanical. `@znasllc-io/memql-sdk-core` is what the shim stands
+   in for; it is published to GitHub Packages, which is the only reason the
+   starter does not simply depend on it.
 
 ## WebSocket auth
 
