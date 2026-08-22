@@ -28,9 +28,11 @@ tracked in memql-project#11; prefer DSL first).
   bare-ids contract enforced by ESLint. See `clients/README.md` for the
   convention and `clients/web/CLAUDE.md` for the surface.
 - `deploy/` -- `Dockerfile.bundle` (the data-only DSL-bundle image) +
-  `k8s/{base,components/dsl-bundle,overlays/{local,staging,prod}}` (the base
-  carries one `clients-<name>.yaml` per surface) +
-  `argocd/` (the product AppProject + staging/prod Applications).
+  `k8s/{base,components/dsl-bundle,overlays/{local,cloud}}` (the base carries
+  one `clients-<name>.yaml` per surface; `local` and `cloud` are the two deploy
+  TARGETS of ONE installation shape -- no staging/prod dimension, a second
+  environment is a second instance; engine epic memql#3943) +
+  `argocd/` (the product AppProject + the one cloud Application).
 - `product.env` -- product identity (PRODUCT, PRODUCT_ORG, DOMAIN, ENGINE_REF,
   REGISTRY). Every operational file reads it.
 - `Makefile` -- the local stack lifecycle (`make up|dev|status|down`).
@@ -74,3 +76,8 @@ rebuild.
 - **Template sync.** Operational files (Makefiles, scripts, CI) are
   byte-identical to the template and read `product.env`, so
   `git merge template/main` stays clean. Keep them that way.
+- **One installation shape.** Two overlays (`local`, `cloud`), one committed
+  ArgoCD Application, no promotion step. Never add an overlay, a Makefile loop
+  entry, a CI loop value or an `if env == ...` branch to stand for an
+  environment; a second environment is a second instance with its own ArgoCD,
+  domain and database (engine epic memql#3943).

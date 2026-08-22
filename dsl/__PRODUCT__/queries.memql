@@ -8,7 +8,18 @@
 //   - greetingsForOwner: an owner-parameterized read used by the
 //     greetOnGreetingCreate automation, which runs under a SYSTEM actor (so
 //     actor.userId is not the greeting's owner -- it must pass the owner id from
-//     the event payload). NOT surfaced as a tool (it takes an explicit owner).
+//     the event payload). NOT surfaced as a tool (it takes an explicit owner),
+//     and marked `@serverOnly` because of it: the filter selects by a
+//     user-scope column from a caller-supplied argument, which is precisely
+//     the shape a client must never be able to aim. `@serverOnly` bars
+//     client-originated calls at EXECUTION against auth.CallOrigin (engine
+//     memql#2800) rather than merely hiding the construct, and it is the
+//     annotation the engine's own per-row authz contract gate names for "an
+//     automation acting on a user other than the actor" -- without it the
+//     query fails that gate at load (`contract-gate:authz-user-scope`), which
+//     refuses boot under strict-boot and fails `memqllint`. A tree-loaded
+//     automation reaches it because the engine stamps the internal call
+//     origin for those; a caller-submitted bundle does not.
 // Reading the auth envelope is a DECLARED capability: a construct whose body
 // touches actor.* carries a bare `@actor` annotation (engine memql#2621), and
 // the loader rejects it otherwise. Row intrinsics in sort keys take the `row.`
@@ -29,6 +40,7 @@ query greeting myGreetings {
 
 @enabled
 @description("List the greetings owned by a given user, newest first. Used by the greetOnGreetingCreate automation, which runs under a system actor and passes the owner id from event.payload.ownerUserId rather than relying on actor.userId. Not surfaced as a tool (it takes an explicit owner arg).")
+@serverOnly
 query greeting greetingsForOwner {
   args {
     ownerUserId  string  @required

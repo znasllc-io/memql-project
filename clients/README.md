@@ -48,11 +48,11 @@ Then, mechanically:
 2. **`deploy/k8s/base/clients-game.yaml`** -- copy `clients-web.yaml`, replace
    `<product>-web` with `<product>-game` throughout. Add it to
    `deploy/k8s/base/kustomization.yaml`'s `resources:`.
-3. **Each overlay** (`local`, `staging`, `prod`) -- add the image pin
-   (`- name: <product>-game`, `newTag: local` locally, `digest:` in
-   staging/prod) and a route to the new Service in `front-door.yaml` /
-   `public-entry.yaml`. A second surface is a second hostname
-   (`game.<domain>`) or a second path prefix; pick one and route it.
+3. **Each overlay** (`local`, `cloud`) -- add the image pin
+   (`- name: <product>-game`, `newTag: local` locally, `digest:` in `cloud`)
+   and a route to the new Service in `front-door.yaml` / `public-entry.yaml`.
+   A second surface is a second hostname (`game.<domain>`) or a second path
+   prefix; pick one and route it.
 4. Nothing else. `make up`, `make dev`, CI's client lane, `publish-images.yml`,
    and the release lockfile pick the surface up from the directory listing.
 

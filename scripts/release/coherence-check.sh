@@ -10,7 +10,7 @@
 #     with three surfaces is gated on all three),
 #   - every digest a real sha256:<64hex> pin (no floating tags),
 #   - engineRef + registry present;
-# and, with --overlay=<env>, additionally asserts that the RENDERED overlay's
+# and, with --overlay=<dir>, additionally asserts that the RENDERED overlay's
 # product images are all digest-pinned AND match the lockfile digests (the
 # "no drift between the pinned overlay and the release" check).
 #
@@ -24,7 +24,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/capability.sh"
 
 cap_init "release.coherence-check" "Validate a release lockfile: product components present + digest-pinned (+ overlay match)."
 cap_spec_param "lockfile" "path to the release lockfile (required)"
-cap_spec_param "overlay"  "also assert this overlay's product images match the lockfile (env: staging|prod)"
+cap_spec_param "overlay"  "also assert this overlay's product images match the lockfile (a digest-pinned overlay directory name under deploy/k8s/overlays/, e.g. cloud; never local)"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
@@ -55,17 +55,17 @@ function lock_components() {
     ' "$1"
 }
 
-# check_overlay <env> <lockfile> -- renders the overlay and compares each product
+# check_overlay <overlay> <lockfile> -- renders the overlay and compares each product
 # image's rendered digest to the lockfile. Emits COHERENCE-FAIL lines; returns 1
 # on any mismatch.
 function check_overlay() {
-    local env="$1" lf="$2"
-    local dir="$REPO_ROOT/deploy/k8s/overlays/$env" rendered rc=0
+    local overlay="$1" lf="$2"
+    local dir="$REPO_ROOT/deploy/k8s/overlays/$overlay" rendered rc=0
     # kubectl is a PREREQUISITE, not a coherence failure: its absence is exit 4
     # (precondition), never exit 5 (op failed). Guard before rendering so a
     # missing tool is reported honestly instead of masquerading as a render fail.
     if ! command -v kubectl >/dev/null 2>&1; then
-        cap_fail 4 "kubectl not found -- required to render + check overlay '$env'"
+        cap_fail 4 "kubectl not found -- required to render + check overlay '$overlay'"
     fi
     if [ ! -d "$dir" ]; then cap_error "COHERENCE-FAIL: overlay dir not found: $dir"; return 1; fi
     # Surface kustomize's own error (do not swallow stderr): a genuine render
@@ -87,10 +87,10 @@ function check_overlay() {
         img_re="$(printf '%s' "$img" | sed 's/[.[\*^$()+?{|]/\\&/g')"
         got="$(printf '%s\n' "$rendered" | grep -oE "${img_re}@sha256:[0-9a-f]{64}" | head -1 | sed 's/.*@//')"
         if [ -z "$got" ]; then
-            cap_error "COHERENCE-FAIL: overlay $env has no digest-pinned $comp image"; rc=1; continue
+            cap_error "COHERENCE-FAIL: overlay $overlay has no digest-pinned $comp image"; rc=1; continue
         fi
         if [ "$got" != "$want" ]; then
-            cap_error "COHERENCE-FAIL: overlay $env $comp digest $got != lockfile $want"; rc=1
+            cap_error "COHERENCE-FAIL: overlay $overlay $comp digest $got != lockfile $want"; rc=1
         fi
     done
     return "$rc"

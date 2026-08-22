@@ -1,8 +1,9 @@
 # AppProject scoping the __PRODUCT__ product's GitOps surface. It scopes the
 # LOCAL cluster's product Application (deploy/k8s/overlays/local -- the bff head +
 # SPA), applied by the root `make up` via the engine's up.sh
-# (--project-manifest), and the STAGING/PROD Applications
-# (apps/__PRODUCT__-{staging,prod}.yaml).
+# (--project-manifest), and the CLOUD Application (apps/__PRODUCT__-cloud.yaml --
+# the one committed Application; one installation shape, engine epic
+# znasllc-io/memql#3943).
 #
 # The engine's own `memql` AppProject allowlists only the engine repo in
 # sourceRepos, so this downstream stack needs its own project allowlisting the
@@ -26,8 +27,8 @@ spec:
     - server: https://kubernetes.default.svc
       namespace: argocd
   # Cluster-scoped resources the overlays legitimately own: the public-entry
-  # cert-manager ClusterIssuer (staging/prod). The memql Namespace is created by
-  # the engine Application.
+  # cert-manager ClusterIssuer (the cloud overlay). The memql Namespace is
+  # created by the engine Application.
   clusterResourceWhitelist:
     - group: cert-manager.io
       kind: ClusterIssuer

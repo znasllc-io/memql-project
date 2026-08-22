@@ -144,8 +144,8 @@ down:
 #     schedules it.
 #   - `product-dev` runs during `make dev`.
 #   - Both run ONLY in the local lifecycle; whether those extras are actually
-#     scheduled is the LOCAL overlay's call, so staging/prod stay fail-closed
-#     unless their overlays opt in.
+#     scheduled is the LOCAL overlay's call, so the cloud overlay stays
+#     fail-closed unless it opts in.
 #   - No `down` hook: extras placed by the local overlay are torn down with the
 #     shared cluster.
 .PHONY: product-up product-dev
@@ -164,9 +164,10 @@ bundle: require-env
 	docker build -f deploy/Dockerfile.bundle -t $(BUNDLE_IMAGE) .
 
 .PHONY: render
-## Render every kustomize overlay (the deploy CI gate, offline).
+## Render every kustomize overlay (the deploy CI gate, offline). Exactly two:
+## local + cloud -- one installation shape (engine epic memql#3943).
 render:
-	@for o in local staging prod; do \
+	@for o in local cloud; do \
 		echo "==> render deploy/k8s/overlays/$$o"; \
 		kubectl kustomize deploy/k8s/overlays/$$o >/dev/null || exit 1; \
 	done

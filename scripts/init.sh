@@ -31,7 +31,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/capability.sh"
 cap_init "product.init" "Stamp this template checkout in place into a concrete memQL product: write product.env, rename + substitute tokens, clone engine + cockpit siblings, prune template artifacts."
 cap_spec_param "product"      "product name (required; ^[a-z][a-z0-9-]*$; e.g. 'acme')"
 cap_spec_param "product-org"  "GitHub org/user owning this product repo (required; e.g. 'acme-io')"
-cap_spec_param "domain"       "the engine's fixed local domain (leave default for local; it is also the staging/prod public-entry placeholder) (default: local.znas.io)"
+cap_spec_param "domain"       "the engine's fixed local domain (leave default for local; it is also the cloud public-entry placeholder) (default: local.znas.io)"
 cap_spec_param "engine-ref"   "engine ref to pin (default: the latest engine release tag, resolved at stamp time; falls back to main with a loud warning when offline)"
 cap_spec_param "registry"     "container registry for the product bundle + client-surface images (default: empty = local-only)"
 cap_spec_param "cockpit-ref"  "cockpit ref to clone (default: main)"
@@ -289,7 +289,7 @@ function substitute_tokens_in_string() {
 # __PRODUCT_ID__ / __PRODUCT_CAMEL__ are substituted first (longer, non-
 # overlapping with __PRODUCT__). __REGISTRY__ uses REGISTRY_MANIFEST, which is
 # the real registry when set and a fail-closed placeholder (registry.example.com)
-# when local-only, so the staging/prod overlays always render a VALID image ref
+# when local-only, so the cloud overlay always renders a VALID image ref
 # (no leading-slash name) even though product.env REGISTRY stays empty for a
 # local-only product.
 function sed_token_program() {
@@ -348,7 +348,8 @@ function rename_token_paths() {
         cap_step "renamed dsl/__PRODUCT__/ -> dsl/$PRODUCT/"
         cap_changed
     fi
-    # deploy/argocd/apps/__PRODUCT__-{staging,prod}.yaml
+    # deploy/argocd/apps/__PRODUCT__-*.yaml -- the one cloud Application today;
+    # matched by glob so an added or renamed app file needs no edit here.
     local f base dst
     for f in "$ROOT"/deploy/argocd/apps/__PRODUCT__-*.yaml; do
         [[ -e "$f" ]] || continue
@@ -463,7 +464,7 @@ function replace_readme() {
         printf '  `clients/web/` (Vite + React + TS SPA). Plural on purpose -- see\n'
         printf '  `clients/README.md` for the convention and how to add another.\n'
         printf -- '- `deploy/` -- the DSL-bundle image (`Dockerfile.bundle`) + kustomize\n'
-        printf '  overlays (local / staging / prod) + the ArgoCD project/app manifests.\n'
+        printf '  overlays (local / cloud) + the ArgoCD project/app manifests.\n'
         printf -- '- `product.env` -- product identity every operational file reads.\n\n'
         printf '## Local stack\n\n'
         printf 'Requires the engine + cockpit checked out as siblings (`../memql`,\n'
@@ -587,7 +588,7 @@ function main() {
     PRODUCT_CAMEL="$(printf '%s' "$PRODUCT" | awk -F- '{out=$1; for(i=2;i<=NF;i++){out=out toupper(substr($i,1,1)) substr($i,2)} print out}')"  # lowerCamelCase for tool names (demo-app -> demoApp) (#38)
     RESOLVED_ENGINE_REF="$(resolve_engine_ref)"
     # Real registry when set; a fail-closed placeholder for local-only products
-    # so staging/prod overlays still render a valid image ref (they also pin
+    # so the cloud overlay still renders a valid image ref (it also pins
     # all-zeros digests that fail closed until a real release).
     REGISTRY_MANIFEST="${REGISTRY_VALUE:-registry.example.com}"
 

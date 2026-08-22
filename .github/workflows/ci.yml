@@ -189,18 +189,21 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: kustomize renders every overlay
+        # Exactly two overlays, local + cloud: one installation shape (engine
+        # epic znasllc-io/memql#3943). There is no environment dimension to
+        # loop over, only the deploy target.
         run: |
-          for o in local staging prod; do
+          for o in local cloud; do
             echo "==> render deploy/k8s/overlays/$o"
             kubectl kustomize "deploy/k8s/overlays/$o" > "/tmp/render-$o.yaml"
           done
-      - name: digest gate (staging/prod product images pinned by @sha256; local exempt)
+      - name: digest gate (cloud product images pinned by @sha256; local exempt)
         run: |
           set -euo pipefail
           # The product's image set is the DSL bundle plus ONE PER CLIENT SURFACE
           # (clients/ is plural -- see clients/README.md). Derive the expected
           # set by listing clients/ so a product that adds a surface without
-          # pinning it in staging/prod fails here instead of shipping a
+          # pinning it in the cloud overlay fails here instead of shipping a
           # half-pinned overlay.
           surfaces="$(find clients -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)"
           [ -n "$surfaces" ] || { echo "ERROR: no client surfaces under clients/ -- see clients/README.md" >&2; exit 1; }
@@ -211,7 +214,7 @@ jobs:
             expected=$((expected + 1))
           done
           echo "expecting $expected product image(s) per overlay: dsl-bundle + $surfaces"
-          for o in staging prod; do
+          for o in cloud; do
             # EVERY product image MUST render AND be digest-pinned. The positive
             # count assertion (C4) stops the gate passing vacuously if an image
             # name drifts so the grep matches nothing.
