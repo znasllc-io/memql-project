@@ -1,0 +1,24 @@
+# CODEOWNERS -- who must review a change before it can merge.
+#
+# WHY THIS FILE EXISTS. The ruleset on this repository already sets
+# `require_code_owner_review: true`. Without a CODEOWNERS file that rule matches
+# no path and therefore requires nothing: the protection reads as enabled in the
+# settings UI and enforces nothing on any pull request. A rule that is on and
+# inert is worse than one that is off, because it is believed.
+#
+# TEAMS, NEVER INDIVIDUALS. GitHub does not let an author approve their own pull
+# request, so naming one person as the owner of a path makes that person unable
+# to land a change to it alone -- the protection becomes a block exactly when the
+# owner is the one working.
+
+*                          @znasllc-io/human-developers
+
+# The deploy substrate. A defect here surfaces as an outage, not a red test.
+/deploy/                   @znasllc-io/human-lead-developers
+/.github/workflows/        @znasllc-io/human-lead-developers
+/.github/CODEOWNERS        @znasllc-io/human-lead-developers
+
+# Product identity: the domain, the engine pin, the registry. Every operational
+# file reads this, so a wrong value here misconfigures the whole instance.
+/product.env               @znasllc-io/human-lead-developers
+/product.env.example       @znasllc-io/human-lead-developers
