@@ -1,0 +1,146 @@
+# Watch the engine for new releases and open a PR bumping this product to them.
+#
+# WHY THIS EXISTS. "Use this template" is a one-time copy. Nothing afterwards
+# tells a product repo that the engine it pins has moved, so ENGINE_REF drifts
+# quietly until an upgrade is a project rather than a routine bump -- which is
+# how a running instance ends up several releases behind with nobody able to say
+# by how many.
+#
+# IT OPENS A PULL REQUEST AND STOPS THERE, deliberately. An engine bump changes
+# what runs in a cluster: it wants CI, and it wants a human. Auto-merging it
+# would turn an upstream release into an unreviewed production change.
+#
+# THE BUMP IS TWO EDITS, NOT ONE. product.env carries ENGINE_REF, and the engine
+# image pins under deploy/k8s/overlays/ carry the same version again. This
+# workflow edits the first and REPORTS the second in the PR body rather than
+# guessing at digests it cannot resolve -- a half-applied bump that looks
+# complete is worse than one that is obviously unfinished.
+
+name: engine-version-watch
+
+on:
+  schedule:
+    # 07:00 UTC Mondays. Weekly is the right cadence for something whose whole
+    # job is to stop a pin going stale over months; more often just reopens the
+    # same PR against a release nobody has read yet.
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check:
+    name: check engine release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: read the pinned engine ref
+        id: current
+        run: |
+          set -euo pipefail
+          if [ ! -f product.env ]; then
+            echo "no product.env -- this is the unstamped template; nothing to bump" >&2
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # shellcheck disable=SC1091
+          . ./product.env
+          echo "skip=false"            >> "$GITHUB_OUTPUT"
+          echo "ref=${ENGINE_REF:-}"   >> "$GITHUB_OUTPUT"
+          echo "INFO: pinned engine ref is ${ENGINE_REF:-<unset>}"
+
+      - name: resolve the latest engine release
+        id: latest
+        if: steps.current.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # A release, not a tag: tags include release candidates and one-off
+          # markers, and this must only ever propose something published.
+          latest="$(gh release view --repo znasllc-io/memql --json tagName -q .tagName 2>/dev/null || true)"
+          if [ -z "$latest" ]; then
+            echo "WARNING: could not resolve a latest engine release; leaving the pin alone" >&2
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=false"      >> "$GITHUB_OUTPUT"
+          echo "tag=${latest}"   >> "$GITHUB_OUTPUT"
+          echo "INFO: latest engine release is ${latest}"
+
+      - name: open a bump PR when behind
+        if: steps.current.outputs.skip != 'true' && steps.latest.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CURRENT: ${{ steps.current.outputs.ref }}
+          LATEST: ${{ steps.latest.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if [ "$CURRENT" = "$LATEST" ]; then
+            echo "INFO: already on ${LATEST}; nothing to do"
+            exit 0
+          fi
+
+          branch="engine-bump/${LATEST}"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            echo "INFO: ${branch} already exists -- a bump PR for ${LATEST} is open or was closed deliberately"
+            exit 0
+          fi
+
+          git config user.name  "engine-version-watch"
+          git config user.email "noreply@github.com"
+          git checkout -b "$branch"
+
+          # Rewrite ONLY the ENGINE_REF assignment. A blunt substitution across
+          # the file would also rewrite the explanatory comments that name the
+          # old version, which is how a diff becomes unreviewable.
+          tmp="$(mktemp)"
+          awk -v new="$LATEST" '
+            /^ENGINE_REF=/ { print "ENGINE_REF=" new; next }
+            { print }
+          ' product.env > "$tmp"
+          mv "$tmp" product.env
+
+          git add product.env
+          git commit -m "engine: bump ENGINE_REF ${CURRENT} -> ${LATEST}"
+          git push -u origin "$branch"
+
+          # Name the second half of the bump rather than pretending it is done.
+          pins="$(grep -rl "${CURRENT}" deploy/ 2>/dev/null || true)"
+          if [ -n "$pins" ]; then
+            pin_note="$(printf '%s\n' "$pins" | sed 's/^/- `/; s/$/`/')"
+          else
+            pin_note="_none found — verify by hand._"
+          fi
+
+          {
+            echo "The engine published **${LATEST}**; this product pins \`${CURRENT}\`."
+            echo
+            echo "### What this PR changes"
+            echo "- \`product.env\`: \`ENGINE_REF\` -> \`${LATEST}\`"
+            echo
+            echo "### What it does NOT change, and you must"
+            echo "A bump is two edits. The engine image pins under \`deploy/\` still name the"
+            echo "old version, and this workflow does not touch them -- it cannot resolve the"
+            echo "new digests, and a half-applied bump that looks complete is worse than one"
+            echo "that is obviously unfinished."
+            echo
+            echo "Files still naming \`${CURRENT}\`:"
+            echo
+            if [ -n "$pins" ]; then
+              printf '%s\n' "$pins" | sed 's/^/- `/; s/$/`/'
+            else
+              echo "_none found -- verify by hand._"
+            fi
+            echo
+            echo "### Before merging"
+            echo "- [ ] Read the engine release notes for ${LATEST}"
+            echo "- [ ] Update the image pins above"
+            echo "- [ ] CI green"
+          } > /tmp/pr-body.md
+
+          gh pr create --title "engine: bump to ${LATEST}" --body-file /tmp/pr-body.md

@@ -1,0 +1,158 @@
+# Report how far this repo's HARNESS has drifted from the template it was made
+# from.
+#
+# WHY THIS EXISTS. "Use this template" is a one-time copy. product.env.example
+# already explains the intended remedy -- every operational file stays
+# byte-identical to the template "so a later `git merge template/main` never
+# conflicts on them" -- but nothing performs that merge, or notices when it
+# stops being possible. Drift is therefore invisible until someone tries to
+# adopt a template fix and discovers the file has been edited in place.
+#
+# IT REPORTS; IT DOES NOT MERGE. A product repo legitimately customises its
+# harness, so divergence is not an error and auto-merging the template over it
+# would destroy deliberate work. The output is a job summary naming the files,
+# which is the input to a human deciding whether each difference is intentional.
+#
+# SCOPE IS THE HARNESS ONLY. dsl/, clients/ and deploy/ are the product -- they
+# are SUPPOSED to differ, and including them would bury the signal under the
+# entire reason this repo exists.
+
+name: template-drift
+
+on:
+  schedule:
+    - cron: "0 8 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    name: compare harness against template
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: fetch the template
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/znasllc-io/memql-project.git /tmp/template
+          echo "INFO: template at $(git -C /tmp/template rev-parse --short HEAD)"
+
+      - name: compare
+        run: |
+          set -euo pipefail
+
+          # The harness: files whose job is to operate the repo, not to be the
+          # product. Kept as an explicit list -- a walk that found nothing would
+          # report "no drift" and be indistinguishable from a clean repo.
+          PATHS=(
+            ".github/workflows"
+            "scripts"
+            "Makefile"
+            "CLAUDE.md"
+            "ONBOARDING.md"
+            ".gitignore"
+          )
+
+          # TEMPLATE-ONLY: exists to test the template itself and is pruned when
+          # the template is stamped. Reporting it as "missing here" every week
+          # would be a false positive, and a report with a standing false
+          # positive stops being read.
+          TEMPLATE_ONLY=(
+            ".github/workflows/template-ci.yml"
+          )
+
+          # STAMPED: scripts/init.sh writes product-specific values INTO these
+          # at stamp time, so they differ by construction and always will. They
+          # are still compared -- a template change to them is worth knowing
+          # about -- but reported as expected rather than as drift.
+          STAMPED=(
+            "CLAUDE.md"
+            "ONBOARDING.md"
+            "README.md"
+          )
+
+          in_list() {
+            local needle="$1"; shift
+            local item
+            for item in "$@"; do [ "$item" = "$needle" ] && return 0; done
+            return 1
+          }
+
+          same=0; differs=0; missing=0; extra=0; stamped=0
+          {
+            echo "## Harness drift vs \`memql-project\`"
+            echo
+            echo "| File | State |"
+            echo "|---|---|"
+          } > /tmp/summary.md
+
+          for p in "${PATHS[@]}"; do
+            # Compare file-by-file so a directory reports which member moved,
+            # not merely that something under it did.
+            if [ -d "/tmp/template/$p" ]; then
+              while IFS= read -r f; do
+                rel="${f#/tmp/template/}"
+                if in_list "$rel" "${TEMPLATE_ONLY[@]}"; then
+                  continue
+                elif [ ! -e "$rel" ]; then
+                  echo "| \`$rel\` | **missing here** — template has it |" >> /tmp/summary.md
+                  missing=$((missing+1))
+                elif cmp -s "$f" "$rel"; then
+                  same=$((same+1))
+                else
+                  echo "| \`$rel\` | **differs** |" >> /tmp/summary.md
+                  differs=$((differs+1))
+                fi
+              done < <(find "/tmp/template/$p" -type f)
+
+              while IFS= read -r f; do
+                if [ ! -e "/tmp/template/$f" ]; then
+                  echo "| \`$f\` | local addition (not in template) |" >> /tmp/summary.md
+                  extra=$((extra+1))
+                fi
+              done < <(find "$p" -type f 2>/dev/null || true)
+
+            elif [ -f "/tmp/template/$p" ]; then
+              if [ ! -e "$p" ]; then
+                echo "| \`$p\` | **missing here** — template has it |" >> /tmp/summary.md
+                missing=$((missing+1))
+              elif cmp -s "/tmp/template/$p" "$p"; then
+                same=$((same+1))
+              elif in_list "$p" "${STAMPED[@]}"; then
+                echo "| \`$p\` | differs (stamped by \`init.sh\` — expected) |" >> /tmp/summary.md
+                stamped=$((stamped+1))
+              else
+                echo "| \`$p\` | **differs** |" >> /tmp/summary.md
+                differs=$((differs+1))
+              fi
+            fi
+          done
+
+          {
+            echo
+            echo "**${same} identical · ${differs} differ · ${stamped} stamped · ${missing} missing · ${extra} local additions**"
+            echo
+            if [ "$differs" -eq 0 ] && [ "$missing" -eq 0 ]; then
+              echo "The harness matches the template."
+            else
+              echo "Divergence is not automatically a defect — a product repo customises its"
+              echo "harness. What matters is that each difference is deliberate and someone"
+              echo "knows it exists. To adopt template changes:"
+              echo
+              echo '```'
+              echo "git remote add template https://github.com/znasllc-io/memql-project.git"
+              echo "git fetch template"
+              echo "git merge template/main   # review; the harness is meant not to conflict"
+              echo '```'
+            fi
+          } >> /tmp/summary.md
+
+          cat /tmp/summary.md >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/summary.md
