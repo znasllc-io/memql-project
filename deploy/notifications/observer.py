@@ -171,38 +171,26 @@ def classify(apps, now, limits):
 
 
 def message(config, state, kind, reason, now, evidence=None):
-    labels = {'success': 'Production deployment completed', 'recovery': 'Deployment recovered', 'failed': 'Deployment operation failed', 'error': 'Deployment operation error', 'degraded': 'Service health degraded', 'stalled': 'Deployment stalled', 'anomalous': 'Deployment anomaly', 'unverified': 'Deployment remains unverified'}
+    labels = {'success': 'Deployment complete', 'recovery': 'Deployment recovered', 'failed': 'Deployment failed', 'error': 'Deployment needs attention', 'degraded': 'Service health degraded', 'stalled': 'Deployment taking longer than expected', 'anomalous': 'Deployment needs attention', 'unverified': 'Deployment not yet verified'}
+    descriptions = {
+        'success': 'Production is up to date. Rollout and public checks passed.',
+        'recovery': 'The deployment issue has cleared. Rollout and public checks passed.',
+        'failed': 'A deployment step failed. Review the deployment before retrying.',
+        'error': 'A deployment error needs attention.',
+        'degraded': 'A service is reporting unhealthy. Please review the deployment.',
+        'stalled': 'The rollout is still in progress and taking longer than expected.',
+        'anomalous': 'Deployment status could not be confirmed. Please review it.',
+        'unverified': 'Some deployment checks are still incomplete. Success is not confirmed.',
+    }
     colors = {'success': 3066993, 'recovery': 3066993, 'failed': 15158332, 'error': 15158332}
-    fields = [{'name': 'Instance / cluster', 'value': config['instance'] + ' / ' + config['cluster']}, {'name': 'State', 'value': kind, 'inline': True}, {'name': 'Latest sync attempt elapsed', 'value': str(max(0, int(now - state['started']))) + 's', 'inline': True}]
-    for app in state['apps']:
-        status = app.get('status', {})
-        revision = status.get('sync', {}).get('revision', 'unknown')
-        repo = app.get('spec', {}).get('source', {}).get('repoURL', '')
-        source = revision[:80]
-        if re.fullmatch(r'https://github.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repo) and re.fullmatch(r'[a-f0-9]{40}', revision):
-            source = repo.removesuffix('.git') + '/commit/' + revision
-        fields.append({'name': app['metadata']['name'] + ' source', 'value': source})
-    if evidence:
-        fields.append({'name': 'Services verified', 'value': ', '.join(sorted(set(evidence.get('services', []))))[:1000] or 'see evidence'})
-        for role, images in evidence['images'].items():
-            fields.append({'name': role + ' immutable versions', 'value': '\n'.join(config.get('version_labels', {}).get(image, image) for image in images)[:1000] or 'unavailable'})
-        fields.append({'name': 'Verification', 'value': ', '.join(evidence['probes'])[:1000]})
-    else:
-        fields.append({'name': 'Version evidence', 'value': 'Rollout unverified; do not assume either old or attempted images are fully live.'})
-        if state.get('evidence'):
-            for role, images in state['evidence']['images'].items():
-                fields.append({'name': 'Last verified ' + role + ' (not current)', 'value': '\n'.join(images)[:1000]})
-    if state.get('incident'):
-        fields.append({'name': 'Incident', 'value': state['incident'][:16]})
-    links = config.get('links', {})
-    for name, url in links.items():
-        fields.append({'name': name[:100], 'value': url[:1000]})
-    descriptions = {'failed': 'Inspect failed sync resources before retrying; this is not an outage assertion.', 'error': 'Inspect Argo operation and reconciliation errors before retrying.', 'degraded': 'Inspect readiness and affected service health; sync failure is not implied.', 'stalled': 'Inspect pending resources and hooks. The operation may still complete.', 'anomalous': 'Inspect reconciliation and verification evidence.', 'unverified': 'Required rollout or functional evidence is missing; success has not been established.', 'success': 'Both applications completed rollout; running images, readiness and listed public checks passed. This is not an authenticated user-flow test.', 'recovery': 'The alerted incident cleared; the current rollout and listed checks passed. This is not an authenticated user-flow test.'}
-    # All reason strings originate in this program, never diagnostic bodies.
-    embed = {'title': 'MemQL | ' + labels[kind], 'description': descriptions[kind] + '\n' + reason, 'color': colors.get(kind, 15105570), 'fields': fields[:25], 'timestamp': utc(now), 'footer': {'text': 'Event ' + state['attempt'][:16] + ' | versions are image digests'}}
-    # Discord total embed characters < 6000; bound the aggregate, not just fields.
-    while len(encode(embed)) > 5700 and len(embed['fields']) > 4:
-        embed['fields'].pop()
+    # Detailed evidence stays in state; Discord is the human-readable summary.
+    embed = {
+        'title': config['instance'][:100] + ' · ' + labels[kind],
+        'description': descriptions[kind],
+        'color': colors.get(kind, 15105570),
+        'fields': [{'name': 'Deployment details', 'value': 'Coming soon in MemQL OS.'}],
+        'timestamp': utc(now),
+    }
     return {'username': 'MemQL Deployments', 'allowed_mentions': {'parse': []}, 'embeds': [embed]}
 
 

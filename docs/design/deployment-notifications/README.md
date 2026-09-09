@@ -134,14 +134,12 @@ two named Secrets. Never copy an operator's broad token as a shortcut.
 ## Messages and versions
 
 `message-examples.json` contains illustrative payloads rendered by the same code.
-Messages include instance/cluster, state, source commit links, observation UTC,
-latest sync attempt elapsed time, affected services, failure cause class and
-approved app links. Engine/product versions are immutable image references and
-digests, not a stale product.env engineRef or guessed semver. Optional version_labels
-maps exact full image references to human release labels; it is unnecessary for
-automatic reporting. Failure messages label prior evidence as last verified,
-never as proof that those versions remain live after a partial rollout. Source
-commit links are automatic; PR/release/workflow links can be supplied when known.
+Messages contain the instance name, a short outcome, the observation time and
+“Deployment details: Coming soon in MemQL OS.” The placeholder is plain text until
+the future MemQL OS automation provides a deployment report URL. No fake link is
+created. Image digests, runtime evidence and source revisions remain in persistent
+observer state instead of filling the Discord message. The delivery and verification
+rules are unchanged; failed and incomplete deployments remain clearly distinguished.
 
 Only allowlisted program-generated reason codes/resource names reach Discord.
 Raw operation messages, pod logs, response bodies and secret-bearing URLs are not
