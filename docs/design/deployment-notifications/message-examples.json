@@ -1,0 +1,418 @@
+{
+  "success": {
+    "username": "MemQL Deployments",
+    "allowed_mentions": {
+      "parse": []
+    },
+    "embeds": [
+      {
+        "title": "MemQL | Deployment verified",
+        "description": "Both applications and public functional checks passed for the current composition.\nillustrative-event-only",
+        "color": 3066993,
+        "fields": [
+          {
+            "name": "Instance / cluster",
+            "value": "Example (illustration only) / example-cluster"
+          },
+          {
+            "name": "State",
+            "value": "success",
+            "inline": true
+          },
+          {
+            "name": "Latest sync attempt elapsed",
+            "value": "60s",
+            "inline": true
+          },
+          {
+            "name": "engine source",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          {
+            "name": "product source",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          {
+            "name": "Services verified",
+            "value": "Deployment/edge, Deployment/product-web"
+          },
+          {
+            "name": "engine immutable versions",
+            "value": "example/engine@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+          },
+          {
+            "name": "product immutable versions",
+            "value": "example/product@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+          },
+          {
+            "name": "Verification",
+            "value": "OS HTML/assets, authenticated functional check"
+          },
+          {
+            "name": "Incident",
+            "value": "cccccccccccccccc"
+          }
+        ],
+        "timestamp": "2023-11-14T22:14:20+00:00",
+        "footer": {
+          "text": "Event aaaaaaaaaaaaaaaa | versions are image digests"
+        }
+      }
+    ]
+  },
+  "failed": {
+    "username": "MemQL Deployments",
+    "allowed_mentions": {
+      "parse": []
+    },
+    "embeds": [
+      {
+        "title": "MemQL | Deployment operation failed",
+        "description": "Inspect failed sync resources before retrying; this is not an outage assertion.\nillustrative-event-only",
+        "color": 15158332,
+        "fields": [
+          {
+            "name": "Instance / cluster",
+            "value": "Example (illustration only) / example-cluster"
+          },
+          {
+            "name": "State",
+            "value": "failed",
+            "inline": true
+          },
+          {
+            "name": "Latest sync attempt elapsed",
+            "value": "60s",
+            "inline": true
+          },
+          {
+            "name": "engine source",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          {
+            "name": "product source",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          {
+            "name": "Version evidence",
+            "value": "Rollout unverified; do not assume either old or attempted images are fully live."
+          },
+          {
+            "name": "Incident",
+            "value": "cccccccccccccccc"
+          }
+        ],
+        "timestamp": "2023-11-14T22:14:20+00:00",
+        "footer": {
+          "text": "Event aaaaaaaaaaaaaaaa | versions are image digests"
+        }
+      }
+    ]
+  },
+  "error": {
+    "username": "MemQL Deployments",
+    "allowed_mentions": {
+      "parse": []
+    },
+    "embeds": [
+      {
+        "title": "MemQL | Deployment operation error",
+        "description": "Inspect Argo operation and reconciliation errors before retrying.\nillustrative-event-only",
+        "color": 15158332,
+        "fields": [
+          {
+            "name": "Instance / cluster",
+            "value": "Example (illustration only) / example-cluster"
+          },
+          {
+            "name": "State",
+            "value": "error",
+            "inline": true
+          },
+          {
+            "name": "Latest sync attempt elapsed",
+            "value": "60s",
+            "inline": true
+          },
+          {
+            "name": "engine source",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          {
+            "name": "product source",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          {
+            "name": "Version evidence",
+            "value": "Rollout unverified; do not assume either old or attempted images are fully live."
+          },
+          {
+            "name": "Incident",
+            "value": "cccccccccccccccc"
+          }
+        ],
+        "timestamp": "2023-11-14T22:14:20+00:00",
+        "footer": {
+          "text": "Event aaaaaaaaaaaaaaaa | versions are image digests"
+        }
+      }
+    ]
+  },
+  "stalled": {
+    "username": "MemQL Deployments",
+    "allowed_mentions": {
+      "parse": []
+    },
+    "embeds": [
+      {
+        "title": "MemQL | Deployment stalled",
+        "description": "Inspect pending resources and hooks. The operation may still complete.\nillustrative-event-only",
+        "color": 15105570,
+        "fields": [
+          {
+            "name": "Instance / cluster",
+            "value": "Example (illustration only) / example-cluster"
+          },
+          {
+            "name": "State",
+            "value": "stalled",
+            "inline": true
+          },
+          {
+            "name": "Latest sync attempt elapsed",
+            "value": "60s",
+            "inline": true
+          },
+          {
+            "name": "engine source",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          {
+            "name": "product source",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          {
+            "name": "Version evidence",
+            "value": "Rollout unverified; do not assume either old or attempted images are fully live."
+          },
+          {
+            "name": "Incident",
+            "value": "cccccccccccccccc"
+          }
+        ],
+        "timestamp": "2023-11-14T22:14:20+00:00",
+        "footer": {
+          "text": "Event aaaaaaaaaaaaaaaa | versions are image digests"
+        }
+      }
+    ]
+  },
+  "degraded": {
+    "username": "MemQL Deployments",
+    "allowed_mentions": {
+      "parse": []
+    },
+    "embeds": [
+      {
+        "title": "MemQL | Service health degraded",
+        "description": "Inspect readiness and affected service health; sync failure is not implied.\nillustrative-event-only",
+        "color": 15105570,
+        "fields": [
+          {
+            "name": "Instance / cluster",
+            "value": "Example (illustration only) / example-cluster"
+          },
+          {
+            "name": "State",
+            "value": "degraded",
+            "inline": true
+          },
+          {
+            "name": "Latest sync attempt elapsed",
+            "value": "60s",
+            "inline": true
+          },
+          {
+            "name": "engine source",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          {
+            "name": "product source",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          {
+            "name": "Version evidence",
+            "value": "Rollout unverified; do not assume either old or attempted images are fully live."
+          },
+          {
+            "name": "Incident",
+            "value": "cccccccccccccccc"
+          }
+        ],
+        "timestamp": "2023-11-14T22:14:20+00:00",
+        "footer": {
+          "text": "Event aaaaaaaaaaaaaaaa | versions are image digests"
+        }
+      }
+    ]
+  },
+  "anomalous": {
+    "username": "MemQL Deployments",
+    "allowed_mentions": {
+      "parse": []
+    },
+    "embeds": [
+      {
+        "title": "MemQL | Deployment anomaly",
+        "description": "Inspect reconciliation and verification evidence.\nillustrative-event-only",
+        "color": 15105570,
+        "fields": [
+          {
+            "name": "Instance / cluster",
+            "value": "Example (illustration only) / example-cluster"
+          },
+          {
+            "name": "State",
+            "value": "anomalous",
+            "inline": true
+          },
+          {
+            "name": "Latest sync attempt elapsed",
+            "value": "60s",
+            "inline": true
+          },
+          {
+            "name": "engine source",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          {
+            "name": "product source",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          {
+            "name": "Version evidence",
+            "value": "Rollout unverified; do not assume either old or attempted images are fully live."
+          },
+          {
+            "name": "Incident",
+            "value": "cccccccccccccccc"
+          }
+        ],
+        "timestamp": "2023-11-14T22:14:20+00:00",
+        "footer": {
+          "text": "Event aaaaaaaaaaaaaaaa | versions are image digests"
+        }
+      }
+    ]
+  },
+  "unverified": {
+    "username": "MemQL Deployments",
+    "allowed_mentions": {
+      "parse": []
+    },
+    "embeds": [
+      {
+        "title": "MemQL | Deployment remains unverified",
+        "description": "Required rollout or functional evidence is missing; success has not been established.\nillustrative-event-only",
+        "color": 15105570,
+        "fields": [
+          {
+            "name": "Instance / cluster",
+            "value": "Example (illustration only) / example-cluster"
+          },
+          {
+            "name": "State",
+            "value": "unverified",
+            "inline": true
+          },
+          {
+            "name": "Latest sync attempt elapsed",
+            "value": "60s",
+            "inline": true
+          },
+          {
+            "name": "engine source",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          {
+            "name": "product source",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          {
+            "name": "Version evidence",
+            "value": "Rollout unverified; do not assume either old or attempted images are fully live."
+          },
+          {
+            "name": "Incident",
+            "value": "cccccccccccccccc"
+          }
+        ],
+        "timestamp": "2023-11-14T22:14:20+00:00",
+        "footer": {
+          "text": "Event aaaaaaaaaaaaaaaa | versions are image digests"
+        }
+      }
+    ]
+  },
+  "recovery": {
+    "username": "MemQL Deployments",
+    "allowed_mentions": {
+      "parse": []
+    },
+    "embeds": [
+      {
+        "title": "MemQL | Deployment recovered",
+        "description": "The alerted incident cleared and the current composition passed verification.\nillustrative-event-only",
+        "color": 3066993,
+        "fields": [
+          {
+            "name": "Instance / cluster",
+            "value": "Example (illustration only) / example-cluster"
+          },
+          {
+            "name": "State",
+            "value": "recovery",
+            "inline": true
+          },
+          {
+            "name": "Latest sync attempt elapsed",
+            "value": "60s",
+            "inline": true
+          },
+          {
+            "name": "engine source",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          {
+            "name": "product source",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          {
+            "name": "Services verified",
+            "value": "Deployment/edge, Deployment/product-web"
+          },
+          {
+            "name": "engine immutable versions",
+            "value": "example/engine@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+          },
+          {
+            "name": "product immutable versions",
+            "value": "example/product@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+          },
+          {
+            "name": "Verification",
+            "value": "OS HTML/assets, authenticated functional check"
+          },
+          {
+            "name": "Incident",
+            "value": "cccccccccccccccc"
+          }
+        ],
+        "timestamp": "2023-11-14T22:14:20+00:00",
+        "footer": {
+          "text": "Event aaaaaaaaaaaaaaaa | versions are image digests"
+        }
+      }
+    ]
+  }
+}

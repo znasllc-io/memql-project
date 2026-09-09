@@ -1,0 +1,22 @@
+name: deployment-observer-tests
+on:
+  pull_request:
+    paths:
+      - 'deploy/notifications/**'
+      - 'scripts/notifications/**'
+      - '.github/workflows/deployment-observer-tests.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/notifications/**'
+      - 'scripts/notifications/**'
+      - '.github/workflows/deployment-observer-tests.yml'
+permissions:
+  contents: read
+jobs:
+  observer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - run: python3 -m unittest discover -s scripts/notifications -v
+      - run: kubectl kustomize deploy/notifications > /dev/null

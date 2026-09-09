@@ -1,0 +1,165 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: memql-notifications
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: deployment-observer
+  namespace: memql-notifications
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: memql-deployment-observer
+  namespace: argocd
+rules:
+  - apiGroups: [argoproj.io]
+    resources: [applications]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: memql-deployment-observer
+  namespace: argocd
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: memql-deployment-observer
+subjects:
+  - kind: ServiceAccount
+    name: deployment-observer
+    namespace: memql-notifications
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: memql-deployment-observer
+  namespace: memql
+rules:
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets, daemonsets]
+    verbs: [get]
+  - apiGroups: ['']
+    resources: [pods]
+    verbs: [list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: memql-deployment-observer
+  namespace: memql
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: memql-deployment-observer
+subjects:
+  - kind: ServiceAccount
+    name: deployment-observer
+    namespace: memql-notifications
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: deployment-observer-state
+  namespace: memql-notifications
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deployment-observer
+  namespace: memql-notifications
+spec:
+  # Activation is separate from installation/review. Keep zero until configured.
+  replicas: 0
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: memql-deployment-observer
+  template:
+    metadata:
+      labels:
+        app: memql-deployment-observer
+    spec:
+      serviceAccountName: deployment-observer
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: observer
+          image: python:3.12-alpine@sha256:b64631e04e4920160c50fbe8d8df828f7f35f06f425cb44aa09bca53e708a35a
+          command: [python3, -B, /code/observer.py, --config=/config/config.json]
+          env:
+            - name: PYTHONUNBUFFERED
+              value: '1'
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          startupProbe:
+            exec:
+              command: [python3, -c, "import os; assert os.path.exists('/state/health.json')"]
+            periodSeconds: 10
+            failureThreshold: 60
+          livenessProbe:
+            exec:
+              command: [python3, -c, "import json,time; assert time.time()-json.load(open('/state/health.json'))['loop'] < 900"]
+            periodSeconds: 60
+          readinessProbe:
+            exec:
+              command: [python3, -c, "import json,time; h=json.load(open('/state/health.json')); assert time.time()-h['loop'] < 900 and h['pending'] == 0"]
+            periodSeconds: 30
+          volumeMounts:
+            - name: code
+              mountPath: /code
+              readOnly: true
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: webhook
+              mountPath: /webhook
+              readOnly: true
+            - name: functional-probe
+              mountPath: /probe
+              readOnly: true
+            - name: state
+              mountPath: /state
+      volumes:
+        - name: code
+          configMap:
+            name: memql-deployment-observer-code
+        - name: config
+          configMap:
+            name: memql-deployment-observer-config
+        - name: webhook
+          secret:
+            secretName: memql-discord-deployment-webhook
+        - name: functional-probe
+          secret:
+            secretName: memql-deployment-functional-probe
+            optional: true
+        - name: state
+          persistentVolumeClaim:
+            claimName: deployment-observer-state

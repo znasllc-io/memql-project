@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - resources.yaml
+configMapGenerator:
+  - name: memql-deployment-observer-code
+    namespace: memql-notifications
+    files:
+      - observer.py
+  - name: memql-deployment-observer-config
+    namespace: memql-notifications
+    files:
+      - config.json
