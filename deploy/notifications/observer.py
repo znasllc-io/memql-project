@@ -343,14 +343,15 @@ def workload_images(api, namespace, resource):
     desired = spec.get('replicas', 1) if kind != 'DaemonSet' else status.get('desiredNumberScheduled', 0)
     ready = status.get('readyReplicas', 0) if kind != 'DaemonSet' else status.get('numberReady', 0)
     updated = status.get('updatedReplicas', 0) if kind != 'DaemonSet' else status.get('updatedNumberScheduled', 0)
-    if desired < 1 or ready != desired or updated != desired:
+    if desired < 0 or ready != desired or updated != desired:
         raise SafeFailure(name + ': rollout-not-ready')
-    if kind == 'StatefulSet' and status.get('currentRevision') != status.get('updateRevision'):
+    if desired > 0 and kind == 'StatefulSet' and status.get('currentRevision') != status.get('updateRevision'):
         raise SafeFailure(name + ': statefulset-revision-pending')
     template = spec['template']['spec']
     applied = obj['metadata'].get('annotations', {}).get('kubectl.kubernetes.io/last-applied-configuration')
     try:
-        intended = json.loads(applied)['spec']['template']['spec']
+        applied_spec = json.loads(applied)['spec']
+        intended = applied_spec['template']['spec']
     except Exception:
         raise SafeFailure(name + ': applied-manifest-evidence-missing') from None
     for key in ('containers', 'initContainers'):
@@ -364,6 +365,10 @@ def workload_images(api, namespace, resource):
         raise SafeFailure(name + ': selector-expressions-unverified')
     labels = ','.join(k + '=' + v for k, v in selector['matchLabels'].items())
     pods = api.get('/api/v1/namespaces/' + namespace + '/pods?' + urllib.parse.urlencode({'labelSelector': labels}))['items']
+    if desired == 0:
+        if kind == 'DaemonSet' or applied_spec.get('replicas', 1) != 0 or pods or status.get('replicas', 0) != 0:
+            raise SafeFailure(name + ': scale-zero-evidence-mismatch')
+        return [], []  # Deliberately disabled workload; no running image claim.
     pods = [p for p in pods if not p['metadata'].get('deletionTimestamp')]
     if len(pods) != desired:
         raise SafeFailure(name + ': pod-count-mismatch')
@@ -403,10 +408,10 @@ def verify_composition(config, api, apps, read_apps):
             raise SafeFailure('composition-workloads-missing')
         images = []
         for resource in resources:
-            evidence['services'].append(resource['kind'] + '/' + resource['name'])
             if resource.get('namespace') != config['workload_namespace']:
                 raise SafeFailure('composition-namespace-mismatch')
             found, runtime = workload_images(api, config['workload_namespace'], resource)
+            evidence['services'].append(resource['kind'] + '/' + resource['name'] + (' (scaled to zero)' if not found else ''))
             images.extend(found)
             evidence['runtime'].extend(runtime)
         evidence['images'][config['applications'][app['metadata']['name']]] = sorted(set(images))

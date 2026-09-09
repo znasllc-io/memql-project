@@ -39,7 +39,9 @@ generation, updated/ready replica counts, pod readiness and immutable runtime
 image IDs. It records requested index digests separately from runtime platform
 manifest digests; those need not equal for multiarch images. No operator edits a
 notification plan per release. Missing applied-manifest evidence, floating images,
-zero replicas and selector expressions currently fail closed as unverified.
+and selector expressions currently fail closed as unverified. Explicitly applied
+zero-replica workloads must have no remaining pods and are labeled scaled to zero,
+with no running image claim. Unexpected scale-to-zero fails closed.
 Server-side-apply workloads without this annotation need another authoritative
 manifest source before this verifier can certify them.
 
