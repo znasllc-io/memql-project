@@ -235,10 +235,33 @@ class Verification(unittest.TestCase):
         with self.assertRaisesRegex(o.SafeFailure, 'applied-manifest-evidence-missing'):
             self.verify()
 
-    def test_missing_functional_probe_rejected(self):
+    def test_public_deployment_checks_do_not_require_privileged_credential(self):
         self.config['probes'] = [{'name': 'os', 'assets': True}]
-        with self.assertRaisesRegex(o.SafeFailure, 'functional-or-os'):
+        self.assertEqual(self.verify()['probes'], ['os'])
+
+    def test_missing_os_assets_probe_rejected(self):
+        self.config['probes'] = [{'name': 'health'}]
+        with self.assertRaisesRegex(o.SafeFailure, 'os-probe-not-configured'):
             self.verify()
+
+    def test_intentionally_disabled_workload_has_no_running_image_claim(self):
+        self.deployment['spec']['replicas'] = 0
+        self.deployment['status'].update(readyReplicas=0, updatedReplicas=0)
+        key = 'kubectl.kubernetes.io/last-applied-configuration'
+        applied = json.loads(self.deployment['metadata']['annotations'][key])
+        applied['spec']['replicas'] = 0
+        self.deployment['metadata']['annotations'][key] = json.dumps(applied)
+        with patch.object(self.api, 'get', side_effect=lambda path: {'items': []} if '/pods?' in path else self.deployment):
+            evidence = self.verify()
+        self.assertEqual(evidence['runtime'], [])
+        self.assertTrue(all('(scaled to zero)' in s for s in evidence['services']))
+
+    def test_unexpected_scale_to_zero_is_rejected(self):
+        self.deployment['spec']['replicas'] = 0
+        self.deployment['status'].update(readyReplicas=0, updatedReplicas=0)
+        with patch.object(self.api, 'get', side_effect=lambda path: {'items': []} if '/pods?' in path else self.deployment):
+            with self.assertRaisesRegex(o.SafeFailure, 'scale-zero-evidence-mismatch'):
+                self.verify()
 
     def test_missing_credential_is_unverified_not_exception(self):
         self.config['functional_probe_file'] = '/does-not-exist/check.json'

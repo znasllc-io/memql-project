@@ -1,7 +1,7 @@
 # Automatic deployment notifications
 
 Implemented preparation; inactive until an instance supplies its destination and
-functional probe credential/contract, validates live operation and scales to one.
+public probe configuration, validates live operation and scales to one.
 The base Deployment has zero replicas and is not included in another overlay.
 
 ## Event source and verification
@@ -39,14 +39,17 @@ generation, updated/ready replica counts, pod readiness and immutable runtime
 image IDs. It records requested index digests separately from runtime platform
 manifest digests; those need not equal for multiarch images. No operator edits a
 notification plan per release. Missing applied-manifest evidence, floating images,
-zero replicas and selector expressions currently fail closed as unverified.
+and selector expressions currently fail closed as unverified. Explicitly applied
+zero-replica workloads must have no remaining pods and are labeled scaled to zero,
+with no running image claim. Unexpected scale-to-zero fails closed.
 Server-side-apply workloads without this annotation need another authoritative
 manifest source before this verifier can certify them.
 
 It then probes configured public surfaces, validates OS HTML identity and its
-same-origin script/style assets (rejecting HTML masquerading as JS), and runs an
-authenticated JSON functional check. That check must reject the unauthenticated
-request and satisfy the configured assertions with the dedicated credential.
+same-origin script/style assets (rejecting HTML masquerading as JS). A completion
+message establishes deployment and these listed checks, not authenticated user
+flows. An optional authenticated JSON check, if configured, must reject the
+unauthenticated request and satisfy its assertions with a dedicated credential.
 Redirects are refused, including redirects that could forward credentials.
 It rereads workloads/pod identities and Application status afterward; any change
 invalidates the probe result. Verification evidence is retained in SQLite state.
@@ -104,8 +107,9 @@ Provision only these Kubernetes Secrets in the observer namespace through the
 installation's established secure mechanism. No credentials belong in git:
 
 - `memql-discord-deployment-webhook`, key `url`: the destination webhook URL.
-- `memql-deployment-functional-probe`, keys `token` and `check.json`: a dedicated
-  read-only service credential and the check contract below. Rotation is read on
+- Optional `memql-deployment-functional-probe`, keys `token` and `check.json`: a dedicated
+  read-only service credential and the check contract below. Set
+  `functional_probe_file` to `/probe/check.json` to enable it. Rotation is read on
   every verification; projected volume updates do not require copying tokens.
 
 Example contract shape (replace endpoint and assertion with a real protected,
@@ -122,7 +126,8 @@ read-only functional check for the installed engine/product):
 }
 ```
 
-Missing check/credential produces unverified, never a synthetic pass. No observer
+When enabled, a missing or failing check/credential produces unverified, never a
+synthetic pass. Leaving the optional check unconfigured does not claim auth testing. No observer
 API permissions to read Kubernetes Secrets are granted: kubelet mounts only these
 two named Secrets. Never copy an operator's broad token as a shortcut.
 
@@ -153,7 +158,8 @@ partial paired rollout, stale probes, image drift and missing evidence. Unit tes
 are not a claim that a live Discord delivery or authenticated probe has passed.
 
 After the current production upgrade is confirmed complete: provision the exact
-approved destination and Secrets, choose/test the functional contract, verify the
+approved destination and webhook Secret, verify public checks (and any optional
+authenticated contract), verify the
 instance render and read-only RBAC, install suspended, preserve state volume,
 activate one replica and exercise delivery/verification in an isolated fixture
 installation before relying on the next real rollout. Do not fabricate a failed
