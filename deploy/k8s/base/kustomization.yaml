@@ -1,7 +1,7 @@
 # Product-owned resources for __PRODUCT__ (the DSL-first stack): the bff head
 # (bff-__PRODUCT__, which mounts the product DSL bundle) + one manifest per
 # client surface. This base owns ONLY what the product Application reconciles --
-# the engine mesh (identity/cognition/voice/agent/planner/workbench/mcp + the
+# the engine mesh (identity/agent/planner/workbench/mcp + the
 # neutral bff) is a SEPARATE ArgoCD Application from the engine repo (two
 # Applications, not a kustomize remote base; see downstream-stacks.md). The
 # dsl-bundle component and the per-environment ingress + image pins live in the

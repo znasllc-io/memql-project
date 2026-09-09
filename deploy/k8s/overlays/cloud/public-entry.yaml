@@ -11,7 +11,7 @@
 #   mcp.__DOMAIN__       -> mcp node (remote MCP head, /mcp)
 #   bff.__DOMAIN__       -> product bff raw gRPC (native clients, e.g. memql-cockpit)
 #
-# identity / voice / mcp are engine services (owned by the engine Application);
+# identity / mcp are engine services (owned by the engine Application);
 # an Ingress routes to any Service in the namespace by name. /memql and / route
 # to the product's own bff-__PRODUCT__ and __PRODUCT__-web Services.
 ---
@@ -52,9 +52,8 @@ spec:
           - { path: /, pathType: Prefix, backend: { service: { name: identity, port: { number: 8085 } } } }
 ---
 # app.__DOMAIN__ main routes: / -> __PRODUCT__-web, WS (/memql) -> product bff,
-# audio WS (/memql/audio) -> voice. The audio path needs the voice node, so it
-# gets its own longer-prefix rule (wins over /memql). This Ingress owns the
-# host's TLS cert (cert-manager).
+# with auth proxied to identity. This Ingress owns the host TLS certificate.
+# Conversational audio, spaces and Polyphon routes retired in memql#5017.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -72,16 +71,7 @@ spec:
     - host: app.__DOMAIN__
       http:
         paths:
-          - { path: /memql/audio, pathType: Prefix, backend: { service: { name: voice, port: { number: 8085 } } } }
           - { path: /memql, pathType: Prefix, backend: { service: { name: bff-__PRODUCT__, port: { number: 8085 } } } }
-          # Authenticated bff HTTP routes. They appear in NO PublicPaths-style
-          # aggregate, which is exactly why they are easy to leave unrouted --
-          # the class of gap the engine's cmd/frontdoorpaths generator exists to
-          # close (memql#3703). Keep in step with that generator's output for
-          # the paths a product head serves.
-          - { path: /spaces/, pathType: Prefix, backend: { service: { name: bff-__PRODUCT__, port: { number: 8085 } } } }
-          - { path: /polyphon/room-token, pathType: Prefix, backend: { service: { name: bff-__PRODUCT__, port: { number: 8085 } } } }
-          - { path: /polyphon/status, pathType: Prefix, backend: { service: { name: bff-__PRODUCT__, port: { number: 8085 } } } }
           - { path: /, pathType: Prefix, backend: { service: { name: __PRODUCT__-web, port: { number: 8080 } } } }
 ---
 # app.__DOMAIN__ same-origin auth proxy: the token XHRs the SPA makes (relative

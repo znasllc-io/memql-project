@@ -2,7 +2,7 @@
 # deploy/argocd/apps/__PRODUCT__-cloud.yaml. It owns ONLY product resources:
 # the bff head + client surfaces (../../base), the runtime DSL bundle (vendored
 # dsl-bundle component), and the public nginx/cert-manager entry. The engine
-# mesh (identity/voice/mcp/cognition/agent/planner/workbench + the neutral bff)
+# mesh (identity/mcp/agent/planner/workbench + the neutral bff)
 # is the SEPARATE engine Application (two Applications, not a kustomize remote
 # base; see downstream-stacks.md).
 #
