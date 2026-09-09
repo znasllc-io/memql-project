@@ -92,7 +92,12 @@ spec:
             # deprecation line on every node at every boot.
             - { name: MEMQL_SERVICE_NAME, value: "MemQL" }
             - { name: MEMQL_NODE_TYPE, value: "bff" }
-            - { name: MEMQL_NODE_ADDRESS, value: "bff-__PRODUCT__:50058" }
+            # Advertise this replica, so forwards reach its worker streams.
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - { name: MEMQL_NODE_ADDRESS, value: "$(POD_IP):50058" }
             # Unique per-pod mesh identity: overrides the shared genesis
             # MEMQL_NODE_ID so PeerManager keys each pod distinctly.
             - { name: MEMQL_NODE_ID, valueFrom: { fieldRef: { fieldPath: metadata.name } } }
