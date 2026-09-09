@@ -55,8 +55,8 @@ spec:
           imagePullPolicy: IfNotPresent
           lifecycle:
             preStop:
-              exec:
-                command: ["/bin/sh", "-c", "sleep 5"]
+              sleep:
+                seconds: 5
           ports:
             - { name: http, containerPort: 8085 }
             - { name: grpc, containerPort: 50051 }
@@ -99,7 +99,7 @@ spec:
             - { name: MEMQL_DEPLOYMENT_ID, valueFrom: { fieldRef: { fieldPath: "metadata.labels['pod-template-hash']" } } }
             - { name: MEMQL_NODE_SERVICE_ADDRESS, value: ":50058" }
             # Reach the shared engine leaf nodes (owned by the engine Application).
-            - { name: MEMQL_WORKER_PEERS, value: "voice=voice:50059,agent=agent:50055,cognition=cognition:50054,planner=planner:50056,workbench=workbench:50060" }
+            - { name: MEMQL_WORKER_PEERS, value: "agent=agent:50055,planner=planner:50056,workbench=workbench:50060" }
             - { name: MEMQL_GRPC_ADDRESS, value: ":50051" }
             - { name: MEMQL_SERVER_ADDRESS, value: "0.0.0.0:8085" }
             - { name: MEMQL_IDENTITY_VERIFIER_BASE_URL, value: "https://identity:8085" }
@@ -135,17 +135,8 @@ spec:
             # its own public host and so OVERRIDES this via its
             # identity-config.yaml patch (see the overlay activation checklist).
             - { name: MEMQL_SERVER_ALLOWED_ORIGINS, value: "https://app.__DOMAIN__" }
-            # The memQL Portal is DELIBERATELY NOT SERVED by the product bff,
-            # and there is no longer an env var that could make it be.
-            #
-            # The portal is the PLATFORM's operations console, not a product
-            # surface. Since engine memql#3711 it is site #1: an ordinary hosted
-            # site served by the engine's `edge` node at portal.<domain>, resolved
-            # by hostname to a v1:platform:site row whose bundleRef names the
-            # directory the bytes live in. component/portal is retired and
-            # MEMQL_PORTAL_DIST with it, so there is nothing to set here -- the
-            # engine Application owns the edge node, the site row and the
-            # portal front-door rule.
+            # MemQL OS is served by the engine's edge node at os.<domain>.
+            # The product BFF serves this product's API only (memql#5015).
             # Shared DB -- migrations run once on the engine identity node.
             - { name: MEMORY_NODES_DATABASE_MIGRATE_ON_START, value: "false" }
           volumeMounts:

@@ -5,11 +5,11 @@
 #                              bridge the SPA consumes).
 #   https://app.__DOMAIN__  -> the in-cluster `web` client surface, with the same
 #                              path-routing as the deployed public entry:
-#                              /memql/audio -> voice, /memql -> the product bff,
+#                              /memql -> the product bff,
 #                              the auth paths -> identity, / -> __PRODUCT__-web.
 # A SECOND client surface (clients/README.md) takes its own host rule here (e.g.
 # game.__DOMAIN__ -> __PRODUCT__-game) or its own longer path prefix.
-# voice + identity are engine services (owned by the engine Application); an
+# identity is an engine service (owned by the engine Application); an
 # Ingress routes to any Service in the namespace by name.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -53,16 +53,7 @@ spec:
     - host: app.__DOMAIN__
       http:
         paths:
-          - { path: /memql/audio, pathType: Prefix, backend: { service: { name: voice, port: { number: 8085 } } } }
           - { path: /memql, pathType: Prefix, backend: { service: { name: bff-__PRODUCT__, port: { number: 8085 } } } }
-          # Authenticated bff HTTP routes that appear in NO PublicPaths-style
-          # aggregate and so are easy to leave unrouted -- which is the failure
-          # the engine's cmd/frontdoorpaths generator exists to prevent. Keep
-          # this list in step with that generator's output for the paths a
-          # product head actually serves.
-          - { path: /spaces/, pathType: Prefix, backend: { service: { name: bff-__PRODUCT__, port: { number: 8085 } } } }
-          - { path: /polyphon/room-token, pathType: Prefix, backend: { service: { name: bff-__PRODUCT__, port: { number: 8085 } } } }
-          - { path: /polyphon/status, pathType: Prefix, backend: { service: { name: bff-__PRODUCT__, port: { number: 8085 } } } }
           - { path: /auth/refresh, pathType: Prefix, backend: { service: { name: identity, port: { number: 8085 } } } }
           - { path: /auth/logout, pathType: Prefix, backend: { service: { name: identity, port: { number: 8085 } } } }
           - { path: /oauth/token, pathType: Prefix, backend: { service: { name: identity, port: { number: 8085 } } } }
