@@ -235,9 +235,13 @@ class Verification(unittest.TestCase):
         with self.assertRaisesRegex(o.SafeFailure, 'applied-manifest-evidence-missing'):
             self.verify()
 
-    def test_missing_functional_probe_rejected(self):
+    def test_public_deployment_checks_do_not_require_privileged_credential(self):
         self.config['probes'] = [{'name': 'os', 'assets': True}]
-        with self.assertRaisesRegex(o.SafeFailure, 'functional-or-os'):
+        self.assertEqual(self.verify()['probes'], ['os'])
+
+    def test_missing_os_assets_probe_rejected(self):
+        self.config['probes'] = [{'name': 'health'}]
+        with self.assertRaisesRegex(o.SafeFailure, 'os-probe-not-configured'):
             self.verify()
 
     def test_missing_credential_is_unverified_not_exception(self):

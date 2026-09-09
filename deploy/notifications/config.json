@@ -5,6 +5,5 @@
   "workload_namespace": "memql",
   "applications": {"configure-engine-app": "engine", "configure-product-app": "product"},
   "webhook_file": "/webhook/url",
-  "functional_probe_file": "/probe/check.json",
   "probes": []
 }

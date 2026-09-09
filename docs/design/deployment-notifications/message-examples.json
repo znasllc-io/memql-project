@@ -6,8 +6,8 @@
     },
     "embeds": [
       {
-        "title": "MemQL | Deployment verified",
-        "description": "Both applications and public functional checks passed for the current composition.\nillustrative-event-only",
+        "title": "MemQL | Production deployment completed",
+        "description": "Both applications completed rollout; running images, readiness and listed public checks passed. This is not an authenticated user-flow test.\nillustrative-event-only",
         "color": 3066993,
         "fields": [
           {

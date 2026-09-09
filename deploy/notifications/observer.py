@@ -171,7 +171,7 @@ def classify(apps, now, limits):
 
 
 def message(config, state, kind, reason, now, evidence=None):
-    labels = {'success': 'Deployment verified', 'recovery': 'Deployment recovered', 'failed': 'Deployment operation failed', 'error': 'Deployment operation error', 'degraded': 'Service health degraded', 'stalled': 'Deployment stalled', 'anomalous': 'Deployment anomaly', 'unverified': 'Deployment remains unverified'}
+    labels = {'success': 'Production deployment completed', 'recovery': 'Deployment recovered', 'failed': 'Deployment operation failed', 'error': 'Deployment operation error', 'degraded': 'Service health degraded', 'stalled': 'Deployment stalled', 'anomalous': 'Deployment anomaly', 'unverified': 'Deployment remains unverified'}
     colors = {'success': 3066993, 'recovery': 3066993, 'failed': 15158332, 'error': 15158332}
     fields = [{'name': 'Instance / cluster', 'value': config['instance'] + ' / ' + config['cluster']}, {'name': 'State', 'value': kind, 'inline': True}, {'name': 'Latest sync attempt elapsed', 'value': str(max(0, int(now - state['started']))) + 's', 'inline': True}]
     for app in state['apps']:
@@ -197,7 +197,7 @@ def message(config, state, kind, reason, now, evidence=None):
     links = config.get('links', {})
     for name, url in links.items():
         fields.append({'name': name[:100], 'value': url[:1000]})
-    descriptions = {'failed': 'Inspect failed sync resources before retrying; this is not an outage assertion.', 'error': 'Inspect Argo operation and reconciliation errors before retrying.', 'degraded': 'Inspect readiness and affected service health; sync failure is not implied.', 'stalled': 'Inspect pending resources and hooks. The operation may still complete.', 'anomalous': 'Inspect reconciliation and verification evidence.', 'unverified': 'Required rollout or functional evidence is missing; success has not been established.', 'success': 'Both applications and public functional checks passed for the current composition.', 'recovery': 'The alerted incident cleared and the current composition passed verification.'}
+    descriptions = {'failed': 'Inspect failed sync resources before retrying; this is not an outage assertion.', 'error': 'Inspect Argo operation and reconciliation errors before retrying.', 'degraded': 'Inspect readiness and affected service health; sync failure is not implied.', 'stalled': 'Inspect pending resources and hooks. The operation may still complete.', 'anomalous': 'Inspect reconciliation and verification evidence.', 'unverified': 'Required rollout or functional evidence is missing; success has not been established.', 'success': 'Both applications completed rollout; running images, readiness and listed public checks passed. This is not an authenticated user-flow test.', 'recovery': 'The alerted incident cleared; the current rollout and listed checks passed. This is not an authenticated user-flow test.'}
     # All reason strings originate in this program, never diagnostic bodies.
     embed = {'title': 'MemQL | ' + labels[kind], 'description': descriptions[kind] + '\n' + reason, 'color': colors.get(kind, 15105570), 'fields': fields[:25], 'timestamp': utc(now), 'footer': {'text': 'Event ' + state['attempt'][:16] + ' | versions are image digests'}}
     # Discord total embed characters < 6000; bound the aggregate, not just fields.
@@ -417,8 +417,8 @@ def verify_composition(config, api, apps, read_apps):
                 probes.append(json.load(stream))
         except Exception:
             raise SafeFailure('functional-probe-credential-or-contract-missing') from None
-    if not probes or not any(p.get('assets') for p in probes) or not any(p.get('json_equals') and p.get('bearer_file') for p in probes):
-        raise SafeFailure('functional-or-os-probe-not-configured')
+    if not probes or not any(p.get('assets') for p in probes):
+        raise SafeFailure('os-probe-not-configured')
     for spec in probes:
         try:
             probe(spec)
