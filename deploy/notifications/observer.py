@@ -170,8 +170,17 @@ def classify(apps, now, limits):
     return ('ready', 'composition-awaiting-verification', 0) if ready else ('pending', 'composition-not-ready', 0)
 
 
-def overview_version(state):
-    # Shared Argo sync revision only when every tracked app agrees.
+def overview_version(state, config=None):
+    # Prefer the cut engine release from instance config (same value as ENGINE_REF),
+    # e.g. v0.21.7. Operators cut SemVer releases; the Argo SHA is not the product version.
+    config = config or {}
+    configured = config.get('version')
+    if isinstance(configured, str):
+        configured = configured.strip()
+        # Accept v-prefixed SemVer (and simple pre-release / build suffixes).
+        if re.fullmatch(r'v?\d+\.\d+\.\d+[0-9A-Za-z.+-]*', configured):
+            return configured if configured.startswith('v') else 'v' + configured
+    # Fallback: shared Argo sync revision only when every tracked app agrees.
     revisions = []
     for app in state.get('apps') or []:
         revision = (app.get('status') or {}).get('sync', {}).get('revision') or ''
@@ -209,7 +218,7 @@ def message(config, state, kind, reason, now, evidence=None):
     }
     colors = {'success': 3066993, 'recovery': 3066993, 'failed': 15158332, 'error': 15158332}
     # Detailed evidence stays in state; Discord is a short overview.
-    fields = [{'name': 'Version', 'value': overview_version(state)}]
+    fields = [{'name': 'Version', 'value': overview_version(state, config)}]
     os_link = overview_os_link(config)
     if os_link:
         fields.append({'name': 'MemQL OS', 'value': os_link})
