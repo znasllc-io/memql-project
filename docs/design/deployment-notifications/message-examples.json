@@ -6,13 +6,13 @@
     },
     "embeds": [
       {
-        "title": "ZNAS instance · Deployment complete",
+        "title": "ZNAS instance \u00b7 Deployment complete",
         "description": "Production is up to date. Rollout and public checks passed.",
         "color": 3066993,
         "fields": [
           {
             "name": "Version",
-            "value": "aaaaaaa"
+            "value": "v0.21.7"
           },
           {
             "name": "MemQL OS",
@@ -34,13 +34,13 @@
     },
     "embeds": [
       {
-        "title": "ZNAS instance · Deployment failed",
+        "title": "ZNAS instance \u00b7 Deployment failed",
         "description": "A deployment step failed. Review the deployment before retrying.",
         "color": 15158332,
         "fields": [
           {
             "name": "Version",
-            "value": "aaaaaaa"
+            "value": "v0.21.7"
           },
           {
             "name": "MemQL OS",
@@ -62,13 +62,13 @@
     },
     "embeds": [
       {
-        "title": "ZNAS instance · Deployment recovered",
+        "title": "ZNAS instance \u00b7 Deployment recovered",
         "description": "The deployment issue has cleared. Rollout and public checks passed.",
         "color": 3066993,
         "fields": [
           {
             "name": "Version",
-            "value": "aaaaaaa"
+            "value": "v0.21.7"
           },
           {
             "name": "MemQL OS",
@@ -90,13 +90,13 @@
     },
     "embeds": [
       {
-        "title": "ZNAS instance · Deployment not yet verified",
+        "title": "ZNAS instance \u00b7 Deployment not yet verified",
         "description": "Some deployment checks are still incomplete. Success is not confirmed.",
         "color": 15105570,
         "fields": [
           {
             "name": "Version",
-            "value": "aaaaaaa"
+            "value": "v0.21.7"
           },
           {
             "name": "MemQL OS",

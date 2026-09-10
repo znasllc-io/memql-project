@@ -137,8 +137,9 @@ two named Secrets. Never copy an operator's broad token as a shortcut.
 Messages contain the instance name, a short outcome, the observation time and a
 short overview:
 
-- **Version** — shared Argo sync revision from the tracked Applications (short
-  SHA when every app agrees; `unknown` when revisions mismatch or are missing).
+- **Version** — cut engine release from instance config `version` (same value as
+  `ENGINE_REF`, e.g. `v0.21.7`). When unset or invalid, falls back to the shared
+  Argo sync revision (short SHA when every app agrees; `unknown` on mismatch).
 - **MemQL OS** — markdown link from `config.links["MemQL OS"]` when present.
   Omitted entirely when that link is not configured; no URL is invented.
 - **Deployment details** — plain-text placeholder `Coming soon in MemQL OS.` until
