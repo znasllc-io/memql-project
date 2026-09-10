@@ -170,6 +170,31 @@ def classify(apps, now, limits):
     return ('ready', 'composition-awaiting-verification', 0) if ready else ('pending', 'composition-not-ready', 0)
 
 
+def overview_version(state):
+    # Shared Argo sync revision only when every tracked app agrees.
+    revisions = []
+    for app in state.get('apps') or []:
+        revision = (app.get('status') or {}).get('sync', {}).get('revision') or ''
+        if revision and revision != 'unknown':
+            revisions.append(revision)
+    unique = set(revisions)
+    if len(unique) != 1 or len(revisions) != len(state.get('apps') or []):
+        return 'unknown'
+    revision = next(iter(unique))
+    return revision[:7] if len(revision) > 7 else revision
+
+
+def overview_os_link(config):
+    links = config.get('links') or {}
+    url = links.get('MemQL OS')
+    if not isinstance(url, str) or not url.strip():
+        return None
+    url = url.strip()
+    if not url.startswith('https://'):
+        return None
+    return '[Open](' + url + ')'
+
+
 def message(config, state, kind, reason, now, evidence=None):
     labels = {'success': 'Deployment complete', 'recovery': 'Deployment recovered', 'failed': 'Deployment failed', 'error': 'Deployment needs attention', 'degraded': 'Service health degraded', 'stalled': 'Deployment taking longer than expected', 'anomalous': 'Deployment needs attention', 'unverified': 'Deployment not yet verified'}
     descriptions = {
@@ -183,12 +208,17 @@ def message(config, state, kind, reason, now, evidence=None):
         'unverified': 'Some deployment checks are still incomplete. Success is not confirmed.',
     }
     colors = {'success': 3066993, 'recovery': 3066993, 'failed': 15158332, 'error': 15158332}
-    # Detailed evidence stays in state; Discord is the human-readable summary.
+    # Detailed evidence stays in state; Discord is a short overview.
+    fields = [{'name': 'Version', 'value': overview_version(state)}]
+    os_link = overview_os_link(config)
+    if os_link:
+        fields.append({'name': 'MemQL OS', 'value': os_link})
+    fields.append({'name': 'Deployment details', 'value': 'Coming soon in MemQL OS.'})
     embed = {
         'title': config['instance'][:100] + ' · ' + labels[kind],
         'description': descriptions[kind],
         'color': colors.get(kind, 15105570),
-        'fields': [{'name': 'Deployment details', 'value': 'Coming soon in MemQL OS.'}],
+        'fields': fields,
         'timestamp': utc(now),
     }
     return {'username': 'MemQL Deployments', 'allowed_mentions': {'parse': []}, 'embeds': [embed]}

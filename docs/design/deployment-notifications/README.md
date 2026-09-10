@@ -134,10 +134,18 @@ two named Secrets. Never copy an operator's broad token as a shortcut.
 ## Messages and versions
 
 `message-examples.json` contains illustrative payloads rendered by the same code.
-Messages contain the instance name, a short outcome, the observation time and
-“Deployment details: Coming soon in MemQL OS.” The placeholder is plain text until
-the future MemQL OS automation provides a deployment report URL. No fake link is
-created. Image digests, runtime evidence and source revisions remain in persistent
+Messages contain the instance name, a short outcome, the observation time and a
+short overview:
+
+- **Version** — shared Argo sync revision from the tracked Applications (short
+  SHA when every app agrees; `unknown` when revisions mismatch or are missing).
+- **MemQL OS** — markdown link from `config.links["MemQL OS"]` when present.
+  Omitted entirely when that link is not configured; no URL is invented.
+- **Deployment details** — plain-text placeholder `Coming soon in MemQL OS.` until
+  a future MemQL OS automation provides a richer deployment report URL. No fake
+  report link is created.
+
+Image digests, runtime evidence and full source revisions remain in persistent
 observer state instead of filling the Discord message. The delivery and verification
 rules are unchanged; failed and incomplete deployments remain clearly distinguished.
 

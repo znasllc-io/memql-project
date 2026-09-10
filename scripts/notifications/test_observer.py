@@ -20,7 +20,7 @@ class Transitions(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.store = o.Store(self.directory.name + '/state.sqlite')
-        self.config = {'instance': 'example', 'cluster': 'example-cluster', 'applications': {'engine': 'engine', 'product': 'product'}, 'thresholds': {'degraded': 2, 'anomalous': 5, 'stalled': 15, 'unverified': 10}}
+        self.config = {'instance': 'example', 'cluster': 'example-cluster', 'applications': {'engine': 'engine', 'product': 'product'}, 'thresholds': {'degraded': 2, 'anomalous': 5, 'stalled': 15, 'unverified': 10}, 'links': {'MemQL OS': 'https://os.example.invalid/'}}
         self.reducer = o.Reducer(self.config, self.store)
         self.now = o.epoch('2026-09-09T00:00:00Z')
         self.current = apps()
@@ -163,8 +163,42 @@ class Transitions(unittest.TestCase):
         self.assertEqual(len(reducer.step(self.current, self.now + 2, self.verify)), 1)
         fresh.db.close()
 
+    def test_message_overview_has_version_os_link_and_placeholder(self):
+        self.deploy()
+        notice = self.step(2)[0][1]
+        fields = {f['name']: f['value'] for f in notice['embeds'][0]['fields']}
+        self.assertEqual(list(fields), ['Version', 'MemQL OS', 'Deployment details'])
+        self.assertEqual(fields['Version'], 'a' * 7)
+        self.assertEqual(fields['MemQL OS'], '[Open](https://os.example.invalid/)')
+        self.assertEqual(fields['Deployment details'], 'Coming soon in MemQL OS.')
+        self.assertNotIn('sha256:', json.dumps(notice))
+
+    def test_message_omits_os_link_when_unconfigured(self):
+        del self.config['links']
+        notice = o.message(self.config, {'apps': [{'status': {'sync': {'revision': 'abcdef0123456789'}}}]}, 'failed', 'x', self.now)
+        names = [f['name'] for f in notice['embeds'][0]['fields']]
+        self.assertEqual(names, ['Version', 'Deployment details'])
+
+    def test_message_version_unknown_on_revision_mismatch(self):
+        state = {'apps': [
+            {'status': {'sync': {'revision': 'a' * 40}}},
+            {'status': {'sync': {'revision': 'b' * 40}}},
+        ]}
+        notice = o.message(self.config, state, 'failed', 'x', self.now)
+        fields = {f['name']: f['value'] for f in notice['embeds'][0]['fields']}
+        self.assertEqual(fields['Version'], 'unknown')
+
+    def test_message_examples_match_renderer(self):
+        examples = json.loads((pathlib.Path(__file__).resolve().parents[2] / 'docs/design/deployment-notifications/message-examples.json').read_text())
+        config = {'instance': 'ZNAS instance', 'links': {'MemQL OS': 'https://os.memql.znas.io/'}}
+        state = {'apps': [{'status': {'sync': {'revision': 'a' * 40}}}, {'status': {'sync': {'revision': 'a' * 40}}}]}
+        now = o.epoch('2026-09-09T16:13:12Z')
+        for kind, expected in examples.items():
+            self.assertEqual(o.message(config, state, kind, 'example', now), expected)
+
 
 class ProbeChecks(unittest.TestCase):
+
     def test_assets_parser(self):
         parser = o.Assets()
         parser.feed('<html><script src="/assets/os.js"></script><link rel="stylesheet" href="/assets/os.css"></html>')
