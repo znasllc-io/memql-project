@@ -6,10 +6,18 @@
     },
     "embeds": [
       {
-        "title": "ZNAS instance \u00b7 Deployment complete",
+        "title": "ZNAS instance · Deployment complete",
         "description": "Production is up to date. Rollout and public checks passed.",
         "color": 3066993,
         "fields": [
+          {
+            "name": "Version",
+            "value": "aaaaaaa"
+          },
+          {
+            "name": "MemQL OS",
+            "value": "[Open](https://os.memql.znas.io/)"
+          },
           {
             "name": "Deployment details",
             "value": "Coming soon in MemQL OS."
@@ -26,10 +34,18 @@
     },
     "embeds": [
       {
-        "title": "ZNAS instance \u00b7 Deployment failed",
+        "title": "ZNAS instance · Deployment failed",
         "description": "A deployment step failed. Review the deployment before retrying.",
         "color": 15158332,
         "fields": [
+          {
+            "name": "Version",
+            "value": "aaaaaaa"
+          },
+          {
+            "name": "MemQL OS",
+            "value": "[Open](https://os.memql.znas.io/)"
+          },
           {
             "name": "Deployment details",
             "value": "Coming soon in MemQL OS."
@@ -46,10 +62,18 @@
     },
     "embeds": [
       {
-        "title": "ZNAS instance \u00b7 Deployment recovered",
+        "title": "ZNAS instance · Deployment recovered",
         "description": "The deployment issue has cleared. Rollout and public checks passed.",
         "color": 3066993,
         "fields": [
+          {
+            "name": "Version",
+            "value": "aaaaaaa"
+          },
+          {
+            "name": "MemQL OS",
+            "value": "[Open](https://os.memql.znas.io/)"
+          },
           {
             "name": "Deployment details",
             "value": "Coming soon in MemQL OS."
@@ -66,10 +90,18 @@
     },
     "embeds": [
       {
-        "title": "ZNAS instance \u00b7 Deployment not yet verified",
+        "title": "ZNAS instance · Deployment not yet verified",
         "description": "Some deployment checks are still incomplete. Success is not confirmed.",
         "color": 15105570,
         "fields": [
+          {
+            "name": "Version",
+            "value": "aaaaaaa"
+          },
+          {
+            "name": "MemQL OS",
+            "value": "[Open](https://os.memql.znas.io/)"
+          },
           {
             "name": "Deployment details",
             "value": "Coming soon in MemQL OS."
