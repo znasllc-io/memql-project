@@ -164,14 +164,21 @@ class Transitions(unittest.TestCase):
         fresh.db.close()
 
     def test_message_overview_has_version_os_link_and_placeholder(self):
+        self.config['version'] = 'v0.21.7'
         self.deploy()
         notice = self.step(2)[0][1]
         fields = {f['name']: f['value'] for f in notice['embeds'][0]['fields']}
         self.assertEqual(list(fields), ['Version', 'MemQL OS', 'Deployment details'])
-        self.assertEqual(fields['Version'], 'a' * 7)
+        self.assertEqual(fields['Version'], 'v0.21.7')
         self.assertEqual(fields['MemQL OS'], '[Open](https://os.example.invalid/)')
         self.assertEqual(fields['Deployment details'], 'Coming soon in MemQL OS.')
         self.assertNotIn('sha256:', json.dumps(notice))
+
+    def test_message_version_falls_back_to_short_sha_without_config(self):
+        self.deploy()
+        notice = self.step(2)[0][1]
+        fields = {f['name']: f['value'] for f in notice['embeds'][0]['fields']}
+        self.assertEqual(fields['Version'], 'a' * 7)
 
     def test_message_omits_os_link_when_unconfigured(self):
         del self.config['links']
@@ -188,9 +195,19 @@ class Transitions(unittest.TestCase):
         fields = {f['name']: f['value'] for f in notice['embeds'][0]['fields']}
         self.assertEqual(fields['Version'], 'unknown')
 
+    def test_message_version_prefers_config_over_revision(self):
+        state = {'apps': [
+            {'status': {'sync': {'revision': 'a' * 40}}},
+            {'status': {'sync': {'revision': 'b' * 40}}},
+        ]}
+        self.config['version'] = '0.21.7'  # bare semver normalizes to v-prefix
+        notice = o.message(self.config, state, 'failed', 'x', self.now)
+        fields = {f['name']: f['value'] for f in notice['embeds'][0]['fields']}
+        self.assertEqual(fields['Version'], 'v0.21.7')
+
     def test_message_examples_match_renderer(self):
         examples = json.loads((pathlib.Path(__file__).resolve().parents[2] / 'docs/design/deployment-notifications/message-examples.json').read_text())
-        config = {'instance': 'ZNAS instance', 'links': {'MemQL OS': 'https://os.memql.znas.io/'}}
+        config = {'instance': 'ZNAS instance', 'version': 'v0.21.7', 'links': {'MemQL OS': 'https://os.memql.znas.io/'}}
         state = {'apps': [{'status': {'sync': {'revision': 'a' * 40}}}, {'status': {'sync': {'revision': 'a' * 40}}}]}
         now = o.epoch('2026-09-09T16:13:12Z')
         for kind, expected in examples.items():
