@@ -274,11 +274,15 @@ class Reducer:
                     evidence = verify(apps)
                 except SafeFailure as error:
                     reason = str(error)
+                    if state.get('verification_error') != reason:
+                        print(encode({'event': 'verification-pending', 'reason': reason}), flush=True)
+                    state['verification_error'] = reason
                     if now - state['started'] >= self.limits['unverified'] and not state.get('unverified'):
                         state['incident'] = state.get('incident') or fingerprint([identity, now, 'verification'])
                         emit('unverified', reason)
                         state['unverified'] = True
                 else:
+                    state.pop('verification_error', None)
                     state['evidence'] = evidence
                     emit('recovery' if state.get('incident') else 'success', 'composition-and-probes-passed', evidence)
                     state.update(done=True, incident=None, unverified=False, baseline=False)
@@ -312,15 +316,17 @@ def probe(spec):
     if spec.get('bearer_file'):
         with open(spec['bearer_file']) as stream:
             headers['Authorization'] = 'Bearer ' + stream.read().strip()
-    def fetch(url, expected, contains=None, send_auth=False):
+    def fetch(url, expected, contains=None, send_auth=False, limit=2_000_000):
         if urllib.parse.urlsplit(url).scheme != 'https':
             raise SafeFailure('probe-requires-https')
         request = urllib.request.Request(url, headers=headers if send_auth else {})
         try:
             with opener.open(request, timeout=10) as response:
-                data = response.read(2_000_001)
-                if response.status != expected or len(data) > 2_000_000:
+                data = response.read(limit + 1)
+                if response.status != expected:
                     raise SafeFailure('probe-response-invalid')
+                if len(data) > limit:
+                    raise SafeFailure('probe-response-too-large')
                 if contains and contains.encode() not in data:
                     raise SafeFailure('probe-content-mismatch')
                 return data
@@ -355,7 +361,9 @@ def probe(spec):
             url = urllib.parse.urljoin(spec['url'], path)
             if urllib.parse.urlsplit(url).netloc != urllib.parse.urlsplit(spec['url']).netloc:
                 raise SafeFailure('probe-cross-origin-asset')
-            data = fetch(url, 200)
+            # Bundled JS can exceed the document/API response limit. Keep a
+            # separate bounded asset budget; still read and validate the asset.
+            data = fetch(url, 200, limit=16_000_000)
             if not data or b'<html' in data[:512].lower() or b'<!doctype html' in data[:512].lower():
                 raise SafeFailure('probe-asset-returned-html')
 

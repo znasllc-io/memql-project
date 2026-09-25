@@ -1,5 +1,6 @@
 import copy
 import importlib.util
+import io
 import json
 import pathlib
 import tempfile
@@ -318,6 +319,34 @@ class Verification(unittest.TestCase):
         self.config['functional_probe_file'] = '/does-not-exist/check.json'
         with self.assertRaisesRegex(o.SafeFailure, 'credential-or-contract-missing'):
             self.verify()
+
+
+
+
+class AssetProbeLimits(unittest.TestCase):
+    def run_probe(self, body, asset=b'console.log("ok")'):
+        class Response(io.BytesIO):
+            status = 200
+        class Opener:
+            def open(self, request, timeout):
+                return Response(body if request.full_url.endswith('/') else asset)
+        with patch.object(o.urllib.request, 'build_opener', return_value=Opener()):
+            o.probe({'url': 'https://os.example.invalid/', 'assets': True})
+
+    def test_current_os_bundle_over_two_megabytes_is_verified(self):
+        self.run_probe(b'<script src="/assets/app.js"></script>', b'x' * 2_055_012)
+
+    def test_asset_budget_stays_bounded(self):
+        with self.assertRaisesRegex(o.SafeFailure, 'probe-response-too-large'):
+            self.run_probe(b'<script src="/assets/app.js"></script>', b'x' * 16_000_001)
+
+    def test_document_budget_is_not_relaxed(self):
+        with self.assertRaisesRegex(o.SafeFailure, 'probe-response-too-large'):
+            self.run_probe(b'x' * 2_000_001)
+
+    def test_html_fallback_is_not_an_asset(self):
+        with self.assertRaisesRegex(o.SafeFailure, 'probe-asset-returned-html'):
+            self.run_probe(b'<script src="/assets/app.js"></script>', b'<!doctype html><html>fallback</html>')
 
 if __name__ == '__main__':
     unittest.main()
