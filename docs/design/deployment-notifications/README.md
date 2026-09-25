@@ -173,3 +173,17 @@ installation before relying on the next real rollout. Do not fabricate a failed
 production deployment just to test notifications. Confirm the first real rollout
 against Argo, actual image composition and the Discord message. Disable by scaling
 to zero; keep PVC and delivery receipts for restart/dedup.
+
+### Probe size limits and verification diagnosis
+
+HTML and API responses are limited to 2 MB. Referenced same-origin JavaScript
+and CSS assets have a separate 16 MB limit; the checker still downloads their
+body and rejects empty responses or HTML fallback pages. A bundle crossing the
+HTML limit must not turn a healthy deployment into a permanent unverified
+incident. Oversized responses report `probe-response-too-large`.
+
+While verification is blocked, the durable state carries `verification_error`.
+The observer logs `verification-pending` when that reason changes and clears
+it after successful verification. Delivery receipts remain separate: `sent=1`
+means Discord returned a message ID; an unverified incident has no recovery
+message until the composition and probes actually pass.
