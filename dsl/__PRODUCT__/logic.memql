@@ -15,7 +15,7 @@
 // as `args.event.payload.*` -- the canonical grammar (see the engine's
 // authoring-rules.md + examples/deploypack; object-literal `name({...})` args
 // are retired). A real product often writes a row or calls an
-// integration.<name>.* capability here; the latter needs a thin bff plugin
+// integration.<name>.* capability here; the latter needs a thin bff pack
 // (bespoke Go), tracked in memql-project#11. Prefer pure DSL first.
 
 use __PRODUCT__.queries.{ greetingsForOwner }
@@ -25,7 +25,5 @@ logic onGreetingCreated {
   args {
     event  object  @required
   }
-  body {
-    return greetingsForOwner(ownerUserId: args.event.payload.ownerUserId)
-  }
+  return query greetingsForOwner(ownerUserId: args.event.payload.ownerUserId)
 }

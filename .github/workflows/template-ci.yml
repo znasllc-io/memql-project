@@ -183,6 +183,8 @@ jobs:
           git clone --depth 1 --branch "$ref" https://github.com/znasllc-io/memql.git /tmp/memql-lint \
             || { echo "ERROR: failed to clone engine at ref '$ref'" >&2; exit 1; }
           ( cd /tmp/memql-lint && go run ./cmd/memqllint "$STAMP_DIR/dsl" )
+          ( cd /tmp/memql-lint && go run ./cmd/memqlmigrate -check \
+            --rewrite=language-line,expressions,bodies,attributes,attributes-namespace "$STAMP_DIR/dsl" )
 
       - name: kustomize renders every overlay (stamped)
         run: |
@@ -289,4 +291,4 @@ jobs:
           echo "linting the stamped DSL against engine ref: $ref"
           git clone --depth 1 --branch "$ref" https://github.com/znasllc-io/memql.git /tmp/memql \
             || { echo "ERROR: failed to clone engine at pinned ref '$ref'" >&2; exit 1; }
-          cd /tmp/memql && go run ./cmd/memqllint "$STAMP_DIR/dsl/demo"
+          cd /tmp/memql && go run ./cmd/memqllint "$STAMP_DIR/dsl"

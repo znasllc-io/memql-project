@@ -333,12 +333,11 @@ function rename_token_paths() {
 
 # write_namespace_pin -- pin the DELIBERATE namespace/directory divergence a
 # hyphenated product name creates. The DSL domain directory is dsl/<product>
-# (the slug, hyphens and all), but the engine's @namespace pattern is
-# [a-z][a-z0-9_]* -- no hyphens -- so the stamped concepts declare
-# @namespace("<product_id>") with underscores (#38). The engine's moved-file
-# guard (memql#2614) refuses any @namespace that neither equals its directory,
-# extends it as "<dir>:...", nor matches the domain's one-line namespace.pin --
-# so without this pin a hyphenated product's domain does not load at all.
+# (the slug, hyphens and all), but the engine's namespace pattern is
+# [a-z][a-z0-9_]* -- no hyphens. The domain's namespace.pin supplies the
+# identifier-safe form (#38, memql#2614); concepts inherit it without a
+# redundant @namespace annotation. Without this pin a hyphenated product's
+# domain does not load at all.
 # A non-hyphenated product needs no pin (directory == namespace) and gets none.
 # The pin is a one-line file holding the namespace, and it ships inside the DSL
 # bundle image with the rest of dsl/, so the mounted domain carries it too.

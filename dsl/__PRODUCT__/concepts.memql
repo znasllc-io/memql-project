@@ -9,9 +9,9 @@
 // ownerUserId == actor.userId; a write path stamps it from actor.userId. The
 // field models an authz-sane concept, not just an empty schema.
 //
-// The concept id assembles from @version + @namespace("__PRODUCT_ID__") + the
+// The concept id assembles from @version + the domain namespace + the
 // name into v1:__PRODUCT_ID__:greeting. The namespace uses __PRODUCT_ID__ (the
-// identifier-safe product form, hyphens -> underscores): the engine's @namespace
+// identifier-safe product form, hyphens -> underscores): the engine's namespace
 // pattern is [a-z][a-z0-9_]* so a hyphenated product would otherwise fail to
 // register (#38). When the two therefore differ -- directory `demo-app`,
 // namespace `demo_app` -- init.sh also writes the one-line
@@ -24,7 +24,6 @@
 // conformance now enforces.
 
 @version("1.0.0")
-@namespace("__PRODUCT_ID__")
 @description("A starter greeting record contributed by the __PRODUCT__ pack. Demonstrates that a pack's embedded .memql concept lands in the engine's concept registry alongside the core domains. Replace with the product's own concepts.")
 @displayCard(primary="message", secondary="ownerUserId", tertiary="createdAt")
 concept greeting {

@@ -28,24 +28,22 @@
 
 use __PRODUCT__.concepts.{ greeting }
 
-@enabled
 @description("List the caller's greetings, newest first. Owned: the row set is gated by ownerUserId==actor.userId server-side, so cross-user reads are impossible.")
 @actor
 query greeting myGreetings {
-  filter   ownerUserId==actor.userId
+  filter   row => row.ownerUserId == actor.userId
   sort     "row.createdAt", "desc"
   paginate 50
   shape    greetingFull
 }
 
-@enabled
 @description("List the greetings owned by a given user, newest first. Used by the greetOnGreetingCreate automation, which runs under a system actor and passes the owner id from event.payload.ownerUserId rather than relying on actor.userId. Not surfaced as a tool (it takes an explicit owner arg).")
 @serverOnly
 query greeting greetingsForOwner {
   args {
     ownerUserId  string  @required
   }
-  filter   ownerUserId==args.ownerUserId
+  filter   row => row.ownerUserId == args.ownerUserId
   sort     "row.createdAt", "desc"
   paginate 50
   shape    greetingFull
