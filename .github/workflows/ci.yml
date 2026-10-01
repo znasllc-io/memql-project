@@ -139,7 +139,8 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4
         with:
-          node-version: '20'
+          # Match clients/web/Dockerfile and support Astro-based surfaces.
+          node-version: '22.12.0'
       # The starter surface is SELF-CONTAINED (a thin local memQL client + a
       # local generated concepts module) and installs with zero private SDKs. A
       # stamped product that adopts the org SDK (clients/<name>/.npmrc maps the org
