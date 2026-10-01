@@ -11,10 +11,9 @@
 
 use __PRODUCT__.concepts.{ greeting }
 
-@enabled
 @description("Create a greeting for the caller. Owned: ownerUserId is stamped from actor.userId, so a caller can only ever create their own greeting. message is required; the caller mints a fresh greetingId.")
 @actor
-mutate greeting createGreeting {
+mutation greeting createGreeting {
   args {
     greetingId  string  @required
     message     string  @required

@@ -16,18 +16,15 @@
 // product code. The trigger names the concept by its canonical id STRING; that
 // is not a DSL import, so no `use` of the concept is needed here.
 //
-// The step passes the event to the logic with a brace-block arg
-// (`logic <name> { event: event }`) and references the logic by its bare,
+// The step passes the event to the logic with a named argument
+// (`react := logic <name>(event: event)`) and references the logic by its bare,
 // un-prefixed name (resolved through the file-top `use`) -- the canonical
 // automation-step grammar (see the engine's authoring-rules.md).
 
 use __PRODUCT__.logic.{ onGreetingCreated }
 
-@enabled
-@trigger(event="node.created", concept="v1:__PRODUCT_ID__:greeting", partition="*")
+@trigger(event="node.created", concept="v1:__PRODUCT_ID__:greeting")
 @description("On creation of a greeting, run the pure-DSL onGreetingCreated logic. Demonstrates a pack automation firing on a graph event with zero product Go.")
 automation greetOnGreetingCreate {
-  step react {
-    logic onGreetingCreated { event: event }
-  }
+  react := logic onGreetingCreated(event: event)
 }
