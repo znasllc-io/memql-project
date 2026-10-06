@@ -33,3 +33,6 @@ npm-debug.log*
 *.out
 coverage.*
 go.work.sum
+
+# Python verification tools
+__pycache__/

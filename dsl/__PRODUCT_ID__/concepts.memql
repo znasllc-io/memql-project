@@ -13,11 +13,9 @@
 // name into v1:__PRODUCT_ID__:greeting. The namespace uses __PRODUCT_ID__ (the
 // identifier-safe product form, hyphens -> underscores): the engine's namespace
 // pattern is [a-z][a-z0-9_]* so a hyphenated product would otherwise fail to
-// register (#38). When the two therefore differ -- directory `demo-app`,
-// namespace `demo_app` -- init.sh also writes the one-line
-// dsl/<product>/namespace.pin the engine's moved-file guard requires for a
-// deliberate divergence (memql#2614); without it the domain refuses to load.
-// A non-hyphenated product has no divergence and no pin.
+// register (#38). The DSL directory also uses __PRODUCT_ID__, so the
+// directory and namespace agree without a namespace.pin override. Two products
+// can therefore bind their own greeting shapes even on the released engine.
 // Ids on the wire are bare short slugs (the engine bare-ifies at
 // its seams; clients never compose canonical ids), so this schema declares no
 // canonical-id @pattern anywhere -- per the A1 inbound-hardening rule the engine

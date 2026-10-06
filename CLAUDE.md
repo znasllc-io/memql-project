@@ -31,7 +31,7 @@ kind the doc forbids. Write **pack**.
 
 ## Layout
 
-- `dsl/__PRODUCT__/` -- the product DSL (.memql): `concepts`, `queries`,
+- `dsl/__PRODUCT_ID__/` -- the product DSL (.memql): `concepts`, `queries`,
   `mutations`, `shapes`, `tools`, `automations`, `logic`. The whole product
   surface. Reusable capabilities (chat/daily-space/avatar/...) are generic
   engine features you reference from DSL; only genuinely one-of-a-kind Go
@@ -72,12 +72,23 @@ the bff head + every client surface + front door + DSL bundle. See
 
 ## Authoring DSL
 
-Edit `.memql` files under `dsl/__PRODUCT__/`. A pure-DSL pack can model concepts,
+Edit `.memql` files under `dsl/__PRODUCT_ID__/`. A pure-DSL pack can model concepts,
 read/write them (queries/mutations), react to graph events (automations calling
 logic/mutations), and expose agent tools -- all with ZERO product Go. The
 `@executor("integration.<name>.*")` builtin is the ONLY construct that needs Go
 (a `bff/` pack module); the starter deliberately avoids it. See the engine's
 `docs/public/language/authoring-rules.md` and `docs/public/build/building-a-pack.md`.
+
+Construct names other than concepts are shared across the loaded domains. Prefix
+product shapes, queries, mutations, logic and automations with the product name,
+as the starter does with `__PRODUCT_CAMEL__`. An import reuses another domain's
+construct; it is not a way to resolve two products accidentally declaring the
+same name.
+
+Core DSL stays embedded in the pinned engine. This repository carries product
+DSL and installation values, not editable copies of core workflows. Reference
+core constructs, configure the inputs they expose, or author separately named
+product constructs. A product bundle cannot replace a sealed core definition.
 
 Validate locally, and **point the linter at `dsl/`, not at one namespace**:
 

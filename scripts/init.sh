@@ -9,7 +9,7 @@ set -euo pipefail
 # (which stamped sibling bundle/client repos). init.sh, on the current checkout:
 #   1. writes product.env (the single source of product identity every
 #      operational file -- Makefiles, scripts, CI -- reads);
-#   2. renames dsl/__PRODUCT__/ -> dsl/<product>/ and the argocd app files;
+#   2. renames dsl/__PRODUCT_ID__/ -> dsl/<namespace>/ and the argocd app files;
 #   3. substitutes the __PRODUCT__ / __PRODUCT_ORG__ / __DOMAIN__ / __ENGINE_REF__
 #      / __REGISTRY__ tokens ONLY where a tool genuinely cannot read product.env
 #      at runtime (dsl file contents, k8s/argocd manifest fields kustomize can't
@@ -154,7 +154,7 @@ function read_existing_env() {
 # reconcile_with_existing_env -- on a re-run (product.env present):
 #   1. REFUSE (exit 3, no mutation) when the requested identity (product/org)
 #      disagrees with the stamped one -- a token-keyed re-stamp would half-apply
-#      and lie (the tree keeps the old dsl/<product>/ + manifests while
+#      and lie (the tree keeps the old dsl/<namespace>/ + manifests while
 #      product.env + the envelope claim the new name). B1.
 #   2. PRESERVE hand-edited/pinned values: for domain/engine-ref/registry, keep
 #      the value already in product.env UNLESS the corresponding flag was passed
@@ -183,12 +183,12 @@ function reconcile_with_existing_env() {
 # the run writes a product.env + envelope claiming the new name over a tree that
 # still carries the old one -- and reports ok:true (the B1-adjacent hole). Stamp
 # evidence = init.sh's own irreversible first-stamp effects: the pre-stamp DSL dir
-# `dsl/__PRODUCT__/` was renamed away, or `template-ci.yml` was pruned. A pristine
+# `dsl/__PRODUCT_ID__/` was renamed away, or `template-ci.yml` was pruned. A pristine
 # template checkout has BOTH, so a legitimate first stamp is never blocked.
 function detect_orphaned_stamp() {
     [[ -f "$ROOT/product.env" ]] && return 0     # present -> reconcile_with_existing_env owns it
-    if [[ ! -d "$ROOT/dsl/__PRODUCT__" ]] || [[ ! -e "$ROOT/.github/workflows/template-ci.yml" ]]; then
-        cap_fail 3 "product.env is missing but this tree was already stamped (dsl/__PRODUCT__/ was renamed away, or template-ci.yml was pruned) -- refusing to stamp over it with a new identity. Restore product.env (e.g. 'git checkout -- product.env' or from history), or start from a fresh template checkout."
+    if [[ ! -d "$ROOT/dsl/__PRODUCT_ID__" ]] || [[ ! -e "$ROOT/.github/workflows/template-ci.yml" ]]; then
+        cap_fail 3 "product.env is missing but this tree was already stamped (dsl/__PRODUCT_ID__/ was renamed away, or template-ci.yml was pruned) -- refusing to stamp over it with a new identity. Restore product.env (e.g. 'git checkout -- product.env' or from history), or start from a fresh template checkout."
     fi
     return 0
 }
@@ -312,10 +312,11 @@ function write_product_env() {
 # rename_token_paths -- rename the token-bearing paths (the dsl domain dir + the
 # argocd app files). Idempotent: a already-renamed path is left as-is.
 function rename_token_paths() {
-    # dsl/__PRODUCT__/ -> dsl/<product>/
-    if [[ -d "$ROOT/dsl/__PRODUCT__" ]]; then
-        mv "$ROOT/dsl/__PRODUCT__" "$ROOT/dsl/$PRODUCT"
-        cap_step "renamed dsl/__PRODUCT__/ -> dsl/$PRODUCT/"
+    # Keep the directory and namespace identical, including hyphenated slugs.
+    # This also lets shapes resolve alongside another product on released engines.
+    if [[ -d "$ROOT/dsl/__PRODUCT_ID__" ]]; then
+        mv "$ROOT/dsl/__PRODUCT_ID__" "$ROOT/dsl/$PRODUCT_ID"
+        cap_step "renamed dsl/__PRODUCT_ID__/ -> dsl/$PRODUCT_ID/"
         cap_changed
     fi
     # deploy/argocd/apps/__PRODUCT__-*.yaml -- the one cloud Application today;
@@ -329,32 +330,6 @@ function rename_token_paths() {
         cap_step "renamed apps/$base -> $(basename "$dst")"
         cap_changed
     done
-}
-
-# write_namespace_pin -- pin the DELIBERATE namespace/directory divergence a
-# hyphenated product name creates. The DSL domain directory is dsl/<product>
-# (the slug, hyphens and all), but the engine's namespace pattern is
-# [a-z][a-z0-9_]* -- no hyphens. The domain's namespace.pin supplies the
-# identifier-safe form (#38, memql#2614); concepts inherit it without a
-# redundant @namespace annotation. Without this pin a hyphenated product's
-# domain does not load at all.
-# A non-hyphenated product needs no pin (directory == namespace) and gets none.
-# The pin is a one-line file holding the namespace, and it ships inside the DSL
-# bundle image with the rest of dsl/, so the mounted domain carries it too.
-function write_namespace_pin() {
-    [[ "$PRODUCT_ID" == "$PRODUCT" ]] && return 0
-    [[ -d "$ROOT/dsl/$PRODUCT" ]] || return 0
-    local target="$ROOT/dsl/$PRODUCT/namespace.pin" tmp
-    tmp="$(mktemp)"
-    printf '%s\n' "$PRODUCT_ID" > "$tmp"
-    if [[ -f "$target" ]] && cmp -s "$tmp" "$target"; then
-        rm -f "$tmp"
-    else
-        mv "$tmp" "$target"
-        cap_step "wrote dsl/$PRODUCT/namespace.pin ($PRODUCT_ID)"
-        cap_changed
-    fi
-    return 0
 }
 
 # substitute_tree -- substitute tokens in the CONTENTS of every non-skipped file
@@ -498,10 +473,7 @@ function print_dry_run_plan() {
     cap_info "engine ref:   $RESOLVED_ENGINE_REF"
     cap_info "registry:     ${REGISTRY_VALUE:-<empty: local-only>}"
     cap_info "would write:  product.env"
-    cap_info "would rename: dsl/__PRODUCT__/ -> dsl/$PRODUCT/, deploy/argocd/apps/__PRODUCT__-*.yaml"
-    if [[ "$PRODUCT_ID" != "$PRODUCT" ]]; then
-        cap_info "would pin:    dsl/$PRODUCT/namespace.pin -> $PRODUCT_ID (hyphenated name; memql#2614)"
-    fi
+    cap_info "would rename: dsl/__PRODUCT_ID__/ -> dsl/$PRODUCT_ID/, deploy/argocd/apps/__PRODUCT__-*.yaml"
     cap_info "would stamp:  dsl/, deploy/, clients/ (every surface: src+manifests+docs), ONBOARDING.md, CLAUDE.md"
     cap_info "would prune:  .github/workflows/template-ci.yml, product.env.example; replace README.md with a product stub"
     if [[ -n "$SKIP_CLONES" ]]; then
@@ -574,7 +546,6 @@ function main() {
     write_product_env
     rename_token_paths
     substitute_tree
-    write_namespace_pin
     replace_readme
     prune_template_artifacts
     clone_siblings

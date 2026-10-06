@@ -35,7 +35,7 @@ document is the design to implement, not a feature to invoke.
 ```
 <workspace>/                    the parent directory (created by init.sh clones)
 ├── <product>/                  THIS repo, stamped -- the whole product
-│   ├── dsl/<product>/          the product DSL (.memql): the whole data surface
+│   ├── dsl/<namespace>/          the product DSL (.memql): the whole data surface
 │   ├── clients/                the product's client surfaces (PLURAL)
 │   │   ├── README.md           the convention + how to add a surface
 │   │   └── web/                the starter surface (Vite + React + TS SPA)
@@ -45,6 +45,14 @@ document is the design to implement, not a feature to invoke.
 ├── memql/                      the shared engine (cloned; never edited per-product)
 └── memql-cockpit/              terminal IDE / ops console (cloned)
 ```
+
+Core DSL ships inside the pinned engine, not as editable files in this
+repository. Product bundles configure and reuse the public core constructs, or
+provide separately named workflows. They cannot replace sealed core definitions.
+The starter prefixes its non-concept constructs so multiple products can share a
+cluster; concept IDs already include the product namespace. New starters use
+that namespace for the DSL directory too: `demo-app` gets `dsl/demo_app/`.
+Existing instances keep their paths and any explicit namespace pins.
 
 The engine never names a product; products plug in through the documented seams
 (`memql/docs/public/operate/downstream-stacks.md` and the `MEMQL_DSL_PATH`
@@ -60,7 +68,7 @@ product boots a full stack with zero engine-repo edits.**
    scripts/init.sh --product=acme --product-org=acme-io
    ```
 
-   This writes `product.env`; renames `dsl/__PRODUCT__/` -> `dsl/acme/`;
+   This writes `product.env`; renames `dsl/__PRODUCT_ID__/` -> `dsl/acme/`;
    substitutes the tokens below only where a tool cannot read `product.env` at
    runtime (DSL contents, k8s/ArgoCD manifest fields, each client surface's
    package + boot defaults, `ONBOARDING.md`, `CLAUDE.md`); clones `../memql` and
@@ -197,7 +205,7 @@ git merge template/main --allow-unrelated-histories   # first time only
 ```
 
 The first `--allow-unrelated-histories` merge pulls the template's **pre-stamp**
-tree, so it resurrects what `init.sh` pruned/renamed (`dsl/__PRODUCT__/`,
+tree, so it resurrects what `init.sh` pruned/renamed (`dsl/__PRODUCT_ID__/`,
 `template-ci.yml`, `product.env.example`, `deploy/argocd/apps/__PRODUCT__-*.yaml`).
 Re-prune them and commit after the first sync (runtime is safe meanwhile -- the
 engine skips `_`-prefixed DSL domains). Later syncs are ordinary merges; expect
@@ -214,7 +222,7 @@ the engine; product-specific -> the product repo.
 | `scripts/init.sh` | the in-place stamper -- a capability script (JSON on stdout, honest exit codes) |
 | `scripts/lib/capability.sh` | vendored capability-script runtime from the engine |
 | `product.env.example` | the product-identity template (pruned by init) |
-| `dsl/__PRODUCT__/` | the starter DSL pack (pure DSL; loads + runs on a plain engine) |
+| `dsl/__PRODUCT_ID__/` | the starter DSL pack (pure DSL; loads + runs on a plain engine) |
 | `clients/` | the product's client surfaces (plural); `clients/web/` is the self-contained starter, `clients/README.md` the convention |
 | `deploy/` | bundle image + kustomize overlays + ArgoCD manifests |
 | `ONBOARDING.md` / `CLAUDE.md` | dev guide + agent guide the stamp personalizes |

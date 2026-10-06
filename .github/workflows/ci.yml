@@ -85,10 +85,10 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: bash syntax
         run: find scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n
-      - name: print-spec emits valid JSON
-        run: scripts/init.sh --print-spec | jq -e '.capability == "product.init" and (.params | length) >= 8'
-      - name: help exits 0
-        run: scripts/init.sh --help > /dev/null
+      - name: capability metadata discovery and failure controls
+        run: python3 -m unittest discover -s scripts/ci -p 'test_capability_conformance.py'
+      - name: every capability emits one spec and supports help
+        run: python3 scripts/ci/capability_conformance.py
       - name: no interactive prompts in scripts
         run: |
           if grep -rnE 'read -p|^[[:space:]]*select ' scripts/ | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#'; then
