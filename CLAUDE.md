@@ -31,7 +31,7 @@ kind the doc forbids. Write **pack**.
 
 ## Layout
 
-- `dsl/__PRODUCT__/` -- the product DSL (.memql): `concepts`, `queries`,
+- `dsl/__PRODUCT_ID__/` -- the product DSL (.memql): `concepts`, `queries`,
   `mutations`, `shapes`, `tools`, `automations`, `logic`. The whole product
   surface. Reusable capabilities (chat/daily-space/avatar/...) are generic
   engine features you reference from DSL; only genuinely one-of-a-kind Go
@@ -72,7 +72,7 @@ the bff head + every client surface + front door + DSL bundle. See
 
 ## Authoring DSL
 
-Edit `.memql` files under `dsl/__PRODUCT__/`. A pure-DSL pack can model concepts,
+Edit `.memql` files under `dsl/__PRODUCT_ID__/`. A pure-DSL pack can model concepts,
 read/write them (queries/mutations), react to graph events (automations calling
 logic/mutations), and expose agent tools -- all with ZERO product Go. The
 `@executor("integration.<name>.*")` builtin is the ONLY construct that needs Go

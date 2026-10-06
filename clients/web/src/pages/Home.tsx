@@ -20,7 +20,7 @@ export default function Home() {
     let live = true;
     client
       .connect()
-      // `__PRODUCT_CAMEL__MyGreetings` is this pack's own OWNED read (dsl/__PRODUCT__/queries.memql).
+      // `__PRODUCT_CAMEL__MyGreetings` is this pack's own OWNED read (dsl/__PRODUCT_ID__/queries.memql).
       // It takes NO arguments on purpose: the row set is gated server-side by
       // ownerUserId==actor.userId, so there is no owner id for a client to pass
       // and no argument that could widen the set. Swap it for one of the
