@@ -186,6 +186,9 @@ jobs:
           ( cd /tmp/memql-lint && go run ./cmd/memqlmigrate -check \
             --rewrite=language-line,expressions,bodies,attributes,attributes-namespace "$STAMP_DIR/dsl" )
 
+      - name: two stamped products load together (#48)
+        run: python3 scripts/ci/starter_coexistence.py --engine-root=/tmp/memql-lint
+
       - name: kustomize renders every overlay (stamped)
         run: |
           for o in local cloud; do

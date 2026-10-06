@@ -46,6 +46,12 @@ document is the design to implement, not a feature to invoke.
 └── memql-cockpit/              terminal IDE / ops console (cloned)
 ```
 
+Core DSL ships inside the pinned engine, not as editable files in this
+repository. Product bundles configure and reuse the public core constructs, or
+provide separately named workflows. They cannot replace sealed core definitions.
+The starter prefixes its non-concept constructs so multiple products can share a
+cluster; concept IDs already include the product namespace.
+
 The engine never names a product; products plug in through the documented seams
 (`memql/docs/public/operate/downstream-stacks.md` and the `MEMQL_DSL_PATH`
 runtime-delivery mechanism). The acceptance bar for the whole pattern: **a second

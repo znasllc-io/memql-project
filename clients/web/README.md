@@ -22,7 +22,7 @@ A lean-but-real starting point (grow it into the product):
   back to `/auth/callback?code=&state=`; the app exchanges that code at
   `/oauth/token`. The magic-link token itself never reaches this app.
 - **One typed query round-trip** — `src/pages/Home.tsx` calls the pack's own
-  owned read (`myGreetings`) over the memQL client and renders bare-id rows.
+  owned read (`__PRODUCT_CAMEL__MyGreetings`) over the memQL client and renders bare-id rows.
 - **One subscription example** — `src/pages/Live.tsx` opens a **structured**
   graph subscription naming a **generated concept id**
   (`src/generated/concepts.ts`) plus the CDC verbs it wants. The engine composes

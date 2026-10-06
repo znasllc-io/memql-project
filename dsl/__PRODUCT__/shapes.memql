@@ -5,11 +5,11 @@
 // use the row.<field> prefix (row.id / row.createdAt); concept fields are bare
 // (see any core owned pack, e.g. the engine's dsl/notes/shapes.memql).
 
-use __PRODUCT__.concepts.{ greeting }
+use __PRODUCT_ID__.concepts.{ greeting }
 
 @row
 @description("Full greeting projection: row id + owner + message + created timestamp.")
-shape greeting greetingFull {
+shape greeting __PRODUCT_CAMEL__GreetingFull {
   row.id
   ownerUserId
   message
