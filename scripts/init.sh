@@ -81,6 +81,7 @@ CAP_STAMP_PATHS=(
     "clients"
     "deploy"
     "ONBOARDING.md"
+    "memql-package.yaml"
     "CLAUDE.md"
 )
 
@@ -463,6 +464,19 @@ function prune_template_artifacts() {
     done
 }
 
+# Materialize the template-owned product recipe before ordinary token stamping.
+# The source's existence is an idempotency check; pipeline policy stays in YAML.
+function materialize_product_pipeline() {
+    local source="$ROOT/.template/memql-package.yaml"
+    if [[ -f "$source" ]]; then
+        cp "$source" "$ROOT/memql-package.yaml"
+        rm "$source"
+        rmdir "$ROOT/.template"
+        cap_step "materialized the product pipeline recipe"
+        cap_changed
+    fi
+}
+
 function print_dry_run_plan() {
     cap_info "DRY RUN -- no changes will be made"
     cap_info "product repo root: $ROOT"
@@ -473,8 +487,11 @@ function print_dry_run_plan() {
     cap_info "engine ref:   $RESOLVED_ENGINE_REF"
     cap_info "registry:     ${REGISTRY_VALUE:-<empty: local-only>}"
     cap_info "would write:  product.env"
+    if [[ -f "$ROOT/.template/memql-package.yaml" ]]; then
+        cap_info "would copy:   .template/memql-package.yaml -> memql-package.yaml; consume the template recipe"
+    fi
     cap_info "would rename: dsl/__PRODUCT_ID__/ -> dsl/$PRODUCT_ID/, deploy/argocd/apps/__PRODUCT__-*.yaml"
-    cap_info "would stamp:  dsl/, deploy/, clients/ (every surface: src+manifests+docs), ONBOARDING.md, CLAUDE.md"
+    cap_info "would stamp:  dsl/, deploy/, clients/ (every surface: src+manifests+docs), ONBOARDING.md, CLAUDE.md, memql-package.yaml"
     cap_info "would prune:  .github/workflows/template-ci.yml, product.env.example; replace README.md with a product stub"
     if [[ -n "$SKIP_CLONES" ]]; then
         cap_info "would clone:  (skipped -- --skip-clones)"
@@ -543,6 +560,7 @@ function main() {
         cap_ok
     fi
 
+    materialize_product_pipeline
     write_product_env
     rename_token_paths
     substitute_tree
