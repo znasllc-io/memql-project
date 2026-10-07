@@ -32,6 +32,8 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: template Makefile parses
         run: make -n help > /dev/null
+      - name: product pipeline stamping preserves owner changes
+        run: python3 -m unittest discover -s scripts/ci -p 'test_pipeline_stamping.py'
 
   init-smoke:
     name: init-smoke (${{ matrix.product }})

@@ -1,0 +1,319 @@
+# Product checks run through the installed MemQL workflow.
+# Requires an engine containing memql#5883; see docs/pipeline-coverage.md.
+formatVersion: 1
+name: __PRODUCT__
+pipeline:
+  image: ghcr.io/znasllc-io/memql-toolchain@sha256:7a457e4d96d2e7f03032a686a65d5447c3b6a78987c19d5622bdbfdc917e11fc
+  platform: linux/arm64
+  stages:
+  - name: checks
+    steps:
+    - name: shellcheck
+      placement: cluster
+      timeout: 45m
+      run: |
+        set -eu
+        bash <<'MEMQL_CHECK'
+        set -euo pipefail
+        export GOTOOLCHAIN=go1.26.6 GOMAXPROCS=2 GOFLAGS=-p=2
+        mkdir -p .memql-ci/tools
+        curl -fsSL --retry 3 https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.aarch64.tar.gz -o .memql-ci/tools/shellcheck.tar.gz
+        echo '68a8133197a50beb8803f8d42f9908d1af1c5540d4bb05fdfca8c1fa47decefc  .memql-ci/tools/shellcheck.tar.gz' | sha256sum -c -
+        tar -xzf .memql-ci/tools/shellcheck.tar.gz -C .memql-ci/tools
+        export PATH="$PWD/.memql-ci/tools/shellcheck-v0.11.0:$PATH"
+
+        # shellcheck scripts
+        (
+        shellcheck --version
+        # scripts/ plus every client surface's scripts/ (clients/ is plural --
+        # see clients/README.md), found by walking rather than named one by one.
+        find scripts clients -name '*.sh' -print0 | xargs -0 shellcheck --severity=warning
+        )
+        MEMQL_CHECK
+    - name: capability-conformance
+      placement: cluster
+      timeout: 45m
+      run: |
+        set -eu
+        bash <<'MEMQL_CHECK'
+        set -euo pipefail
+        export GOTOOLCHAIN=go1.26.6 GOMAXPROCS=2 GOFLAGS=-p=2
+        export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_TERMINAL_PROMPT=0
+        export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$PWD"
+
+        # bash syntax
+        (
+        find scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n
+        )
+
+        # capability metadata discovery and failure controls
+        (
+        python3 -m unittest discover -s scripts/ci -p 'test_capability_conformance.py'
+        )
+
+        # every capability emits one spec and supports help
+        (
+        python3 scripts/ci/capability_conformance.py
+        )
+
+        # no interactive prompts in scripts
+        (
+        if grep -rnE 'read -p|^[[:space:]]*select ' scripts/ | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#'; then
+          echo "ERROR: interactive prompt found; capability scripts are non-interactive" >&2
+          exit 1
+        fi
+        )
+
+        # missing required param exits 2 with failure envelope
+        (
+        set +e
+        out="$(scripts/init.sh --product-org=demo-org 2>/dev/null)"
+        code=$?
+        set -e
+        [ "$code" -eq 2 ] || { echo "expected exit 2, got $code" >&2; exit 1; }
+        echo "$out" | jq -e '.ok == false and .error.code == 2' > /dev/null
+        )
+
+        # unknown flag exits 2
+        (
+        set +e
+        scripts/init.sh --product=demo --product-org=demo-org --bogus-flag > /dev/null 2>&1
+        code=$?
+        set -e
+        [ "$code" -eq 2 ] || { echo "expected exit 2 for unknown flag, got $code" >&2; exit 1; }
+        )
+
+        # dry-run emits success envelope without changing anything
+        (
+        # Use THIS repo's stamped identity when product.env exists; fall back to
+        # a demo identity in-template (unstamped). A hardcoded demo identity is
+        # REFUSED (exit 3) on any stamped instance -- init.sh's identity guard
+        # rejects a mismatched re-stamp before the dry-run branch -- so a
+        # demo-only form would make this required lane red on every stamped
+        # product (found by instance zero, memql-project#15).
+        p=demo; o=demo-org
+        if [ -f product.env ]; then
+          # shellcheck disable=SC1091
+          . ./product.env
+          p="$PRODUCT"; o="$PRODUCT_ORG"
+        fi
+        before="$(git status --porcelain)"
+        scripts/init.sh --product="$p" --product-org="$o" --skip-clones --dry-run \
+          | jq -e '.ok == true and .result.dryRun == true and .changed == false' > /dev/null
+        after="$(git status --porcelain)"
+        [ "$before" = "$after" ] || { echo "dry-run mutated the tree" >&2; exit 1; }
+        )
+        MEMQL_CHECK
+    - name: clients
+      placement: cluster
+      timeout: 45m
+      run: |
+        set -eu
+        bash <<'MEMQL_CHECK'
+        set -euo pipefail
+        export GOTOOLCHAIN=go1.26.6 GOMAXPROCS=2 GOFLAGS=-p=2
+        export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_TERMINAL_PROMPT=0
+        export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$PWD"
+
+        # npm install + typecheck + build + lint (+ test when defined), per surface
+        (
+        set -euo pipefail
+        # EVERY client surface, discovered by listing clients/ -- a product
+        # that adds clients/game/ gets it checked here with no CI edit.
+        surfaces="$(find clients -mindepth 1 -maxdepth 1 -type d | sort)"
+        [ -n "$surfaces" ] || { echo "ERROR: no client surfaces under clients/ -- see clients/README.md" >&2; exit 1; }
+        for dir in $surfaces; do
+          echo "::group::$dir"
+          (
+            cd "$dir"
+            npm install --no-audit --no-fund
+            npm run typecheck
+            npm run build
+            npm run lint
+            if [ "$(jq -r '.scripts.test // empty' package.json)" ]; then
+              npm test
+            else
+              echo "no test script defined in $dir -- skipping npm test"
+            fi
+          )
+          echo "::endgroup::"
+        done
+        )
+        MEMQL_CHECK
+    - name: deploy
+      placement: cluster
+      timeout: 45m
+      run: |
+        set -eu
+        bash <<'MEMQL_CHECK'
+        set -euo pipefail
+        export GOTOOLCHAIN=go1.26.6 GOMAXPROCS=2 GOFLAGS=-p=2
+        export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_TERMINAL_PROMPT=0
+        export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$PWD"
+
+        # kustomize renders every overlay
+        (
+        for o in local cloud; do
+          echo "==> render deploy/k8s/overlays/$o"
+          kubectl kustomize "deploy/k8s/overlays/$o" > "/tmp/render-$o.yaml"
+        done
+        )
+
+        # digest gate (cloud product images pinned by @sha256; local exempt)
+        (
+        set -euo pipefail
+        # The product's image set is the DSL bundle plus ONE PER CLIENT SURFACE
+        # (clients/ is plural -- see clients/README.md). Derive the expected
+        # set by listing clients/ so a product that adds a surface without
+        # pinning it in the cloud overlay fails here instead of shipping a
+        # half-pinned overlay.
+        surfaces="$(find clients -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)"
+        [ -n "$surfaces" ] || { echo "ERROR: no client surfaces under clients/ -- see clients/README.md" >&2; exit 1; }
+        expected=1
+        suffix_re='-dsl-bundle'
+        for c in $surfaces; do
+          suffix_re="$suffix_re|-$c"
+          expected=$((expected + 1))
+        done
+        echo "expecting $expected product image(s) per overlay: dsl-bundle + $surfaces"
+        for o in cloud; do
+          # EVERY product image MUST render AND be digest-pinned. The positive
+          # count assertion (C4) stops the gate passing vacuously if an image
+          # name drifts so the grep matches nothing.
+          imgs="$(grep -E "^\s*(-?\s*)?image:.*($suffix_re)" "/tmp/render-$o.yaml" || true)"
+          n="$(printf '%s\n' "$imgs" | grep -c . || true)"
+          if [ "$n" -lt "$expected" ]; then
+            echo "ERROR: $o overlay rendered $n product image(s); expected >=$expected (the DSL bundle + one per client surface). An image name may have drifted, or a surface is unpinned in this overlay:" >&2
+            printf '%s\n' "$imgs" >&2
+            exit 1
+          fi
+          bad="$(printf '%s\n' "$imgs" | grep -v '@sha256:' || true)"
+          if [ -n "$bad" ]; then
+            echo "ERROR: $o overlay has a floating (non-digest) product image:" >&2
+            printf '%s\n' "$bad" >&2
+            exit 1
+          fi
+          echo "$o: $n product image(s), all digest-pinned"
+        done
+        # The local overlay is exempt: it uses mutable :local tags for k3d
+        # import. Assert the bundle AND every surface render there too, so a
+        # surface missing from the local overlay is caught before `make up`.
+        grep -qE 'dsl-bundle:local' /tmp/render-local.yaml
+        for c in $surfaces; do
+          grep -qE "image: [^ ]*-$c:local" /tmp/render-local.yaml \
+            || { echo "ERROR: local overlay pins no :local image for client surface '$c'" >&2; exit 1; }
+        done
+        echo "digest gate OK"
+        )
+        MEMQL_CHECK
+    - name: dsl
+      placement: cluster
+      timeout: 45m
+      run: |
+        set -eu
+        bash <<'MEMQL_CHECK'
+        set -euo pipefail
+        export GOTOOLCHAIN=go1.26.6 GOMAXPROCS=2 GOFLAGS=-p=2
+        export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_TERMINAL_PROMPT=0
+        export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$PWD"
+
+        # clone the engine at the pinned/default ref (for memqllint)
+        (
+        set -euo pipefail
+        ref=""
+        if [ -f product.env ]; then
+          # shellcheck disable=SC1091
+          . ./product.env
+          ref="${ENGINE_REF:-}"
+        fi
+        if [ -z "$ref" ]; then
+          ref="$(scripts/init.sh --product=ci-probe --product-org=ci-probe --skip-clones --dry-run 2>/dev/null | jq -r '.result.engineRef // empty')"
+        fi
+        [ -n "$ref" ] || { echo "ERROR: could not resolve an engine ref (no product.env pin, and default resolution failed)" >&2; exit 1; }
+        echo "engine ref: $ref"
+        git clone --depth 1 --branch "$ref" https://github.com/znasllc-io/memql.git /tmp/memql \
+          || { echo "ERROR: failed to clone engine at ref '$ref'" >&2; exit 1; }
+        )
+
+        # memqllint the product DSL root (engine-parity tier)
+        (
+        set -euo pipefail
+        dsl_root="$PWD/dsl"
+        # Capture the product path before cd'ing into the engine clone.
+        [ -d "$dsl_root" ] || { echo "no dsl/ root found" >&2; exit 1; }
+        # At least one domain must exist under dsl/, else the parity overlay
+        # mounts nothing and passes trivially -- the exact vacuous-gate this
+        # lane is meant to prevent.
+        if [ -z "$(find "$dsl_root" -mindepth 1 -maxdepth 1 -type d -print -quit)" ]; then
+          echo "no dsl/<domain> dir under $dsl_root" >&2
+          exit 1
+        fi
+        echo "linting DSL root: $dsl_root"
+        cd /tmp/memql
+        go run ./cmd/memqllint "$dsl_root"
+        )
+        MEMQL_CHECK
+  - name: secrets-current
+    runAfterFailure: true
+    'on':
+    - pull_request
+    steps:
+    - name: gitleaks
+      placement: cluster
+      timeout: 45m
+      run: |
+        set -eu
+        bash <<'MEMQL_CHECK'
+        set -euo pipefail
+        export GOTOOLCHAIN=go1.26.6 GOMAXPROCS=2 GOFLAGS=-p=2
+
+        # secret scan
+        (
+        export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_TERMINAL_PROMPT=0
+        export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$PWD"
+        mkdir -p .memql-security/gitleaks
+        go install github.com/zricethezav/gitleaks/v8@v8.30.1
+        export PATH="$(go env GOPATH)/bin:$PATH"
+        gitleaks dir . --no-banner --redact=100 --report-format=json --report-path=.memql-security/gitleaks/findings.json
+        )
+        MEMQL_CHECK
+      memoryMiB: 4096
+      artifacts:
+      - .memql-security/gitleaks
+  - name: secrets-history
+    runAfterFailure: true
+    'on':
+    - push
+    - merge_group
+    - release
+    steps:
+    - name: gitleaks
+      placement: cluster
+      timeout: 45m
+      run: |
+        set -eu
+        bash <<'MEMQL_CHECK'
+        set -euo pipefail
+        export GOTOOLCHAIN=go1.26.6 GOMAXPROCS=2 GOFLAGS=-p=2
+
+        # secret scan
+        (
+        export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_TERMINAL_PROMPT=0
+        export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$PWD"
+        mkdir -p .memql-security/gitleaks
+        go install github.com/zricethezav/gitleaks/v8@v8.30.1
+        export PATH="$(go env GOPATH)/bin:$PATH"
+        [[ "$MEMQL_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
+        [[ "$MEMQL_SHA" =~ ^[0-9a-f]{40}$ ]]
+        if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+         git -c credential.helper= fetch --unshallow --tags "https://github.com/$MEMQL_REPOSITORY.git" "$MEMQL_SHA"
+        else
+         git -c credential.helper= fetch --tags "https://github.com/$MEMQL_REPOSITORY.git" "$MEMQL_SHA"
+        fi
+        test "$(git rev-parse HEAD)" = "$MEMQL_SHA"
+        gitleaks git . --no-banner --redact=100 --report-format=json --report-path=.memql-security/gitleaks/findings.json
+        )
+        MEMQL_CHECK
+      memoryMiB: 4096
+      artifacts:
+      - .memql-security/gitleaks
