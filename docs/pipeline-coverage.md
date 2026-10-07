@@ -48,3 +48,10 @@ Run the existing capability suite with
 Compile both manifests with the combined engine before enabling them. Keep
 native platform qualification, triggers and publication evidence separate from
 source checks; none of the latter prove a release was delivered.
+
+Local command execution passed in the declared Linux ARM64 toolchain image:
+capability contracts, ShellCheck, deployment-observer tests/render, and both
+complete `demo`/`demo-app` matrix recipes. Both cases linted the stamped DSL,
+checked migration/coexistence, rendered local/cloud overlays, built and linted
+the client, and verified repeat-stamp and identity-refusal behavior. Current-tree
+and full-history Gitleaks 8.30.1 also passed (77 historical commits).
