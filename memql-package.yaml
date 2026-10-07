@@ -1,0 +1,578 @@
+# Template checks; init replaces this with .template/memql-package.yaml.
+formatVersion: 1
+name: memql-project
+pipeline:
+  image: ghcr.io/znasllc-io/memql-toolchain@sha256:7a457e4d96d2e7f03032a686a65d5447c3b6a78987c19d5622bdbfdc917e11fc
+  platform: linux/arm64
+  stages:
+  - name: checks
+    steps:
+    - name: pipeline-stamping
+      placement: cluster
+      timeout: 10m
+      run: python3 -m unittest discover -s scripts/ci -p 'test_pipeline_stamping.py'
+    - name: make-parse
+      placement: cluster
+      timeout: 45m
+      run: |
+        set -eu
+        bash <<'MEMQL_CHECK'
+        set -euo pipefail
+        export GOTOOLCHAIN=go1.26.6 GOMAXPROCS=2 GOFLAGS=-p=2
+
+        # template Makefile parses
+        (
+        make -n help > /dev/null
+        )
+        MEMQL_CHECK
+    - name: capability-conformance
+      placement: cluster
+      timeout: 45m
+      run: |
+        set -eu
+        bash <<'MEMQL_CHECK'
+        set -euo pipefail
+        export GOTOOLCHAIN=go1.26.6 GOMAXPROCS=2 GOFLAGS=-p=2
+        export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_TERMINAL_PROMPT=0
+        export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$PWD"
+
+        # bash syntax
+        (
+        find scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n
+        )
+
+        # capability metadata discovery and failure controls
+        (
+        python3 -m unittest discover -s scripts/ci -p 'test_capability_conformance.py'
+        )
+
+        # every capability emits one spec and supports help
+        (
+        python3 scripts/ci/capability_conformance.py
+        )
+
+        # no interactive prompts in scripts
+        (
+        if grep -rnE 'read -p|^[[:space:]]*select ' scripts/ | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#'; then
+          echo "ERROR: interactive prompt found; capability scripts are non-interactive" >&2
+          exit 1
+        fi
+        )
+
+        # missing required param exits 2 with failure envelope
+        (
+        set +e
+        out="$(scripts/init.sh --product-org=demo-org 2>/dev/null)"
+        code=$?
+        set -e
+        [ "$code" -eq 2 ] || { echo "expected exit 2, got $code" >&2; exit 1; }
+        echo "$out" | jq -e '.ok == false and .error.code == 2' > /dev/null
+        )
+
+        # unknown flag exits 2
+        (
+        set +e
+        scripts/init.sh --product=demo --product-org=demo-org --bogus-flag > /dev/null 2>&1
+        code=$?
+        set -e
+        [ "$code" -eq 2 ] || { echo "expected exit 2 for unknown flag, got $code" >&2; exit 1; }
+        )
+
+        # dry-run emits success envelope without changing anything
+        (
+        # Use THIS repo's stamped identity when product.env exists; fall back to
+        # a demo identity in-template (unstamped). A hardcoded demo identity is
+        # REFUSED (exit 3) on any stamped instance -- init.sh's identity guard
+        # rejects a mismatched re-stamp before the dry-run branch -- so a
+        # demo-only form would make this required lane red on every stamped
+        # product (found by instance zero, memql-project#15).
+        p=demo; o=demo-org
+        if [ -f product.env ]; then
+          # shellcheck disable=SC1091
+          . ./product.env
+          p="$PRODUCT"; o="$PRODUCT_ORG"
+        fi
+        before="$(git status --porcelain)"
+        scripts/init.sh --product="$p" --product-org="$o" --skip-clones --dry-run \
+          | jq -e '.ok == true and .result.dryRun == true and .changed == false' > /dev/null
+        after="$(git status --porcelain)"
+        [ "$before" = "$after" ] || { echo "dry-run mutated the tree" >&2; exit 1; }
+        )
+        MEMQL_CHECK
+    - name: shellcheck
+      placement: cluster
+      timeout: 45m
+      run: |
+        set -eu
+        bash <<'MEMQL_CHECK'
+        set -euo pipefail
+        export GOTOOLCHAIN=go1.26.6 GOMAXPROCS=2 GOFLAGS=-p=2
+        mkdir -p .memql-ci/tools
+        curl -fsSL --retry 3 https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.aarch64.tar.gz -o .memql-ci/tools/shellcheck.tar.gz
+        echo '68a8133197a50beb8803f8d42f9908d1af1c5540d4bb05fdfca8c1fa47decefc  .memql-ci/tools/shellcheck.tar.gz' | sha256sum -c -
+        tar -xzf .memql-ci/tools/shellcheck.tar.gz -C .memql-ci/tools
+        export PATH="$PWD/.memql-ci/tools/shellcheck-v0.11.0:$PATH"
+
+        # shellcheck scripts
+        (
+        shellcheck --version
+        # scripts/ plus every client surface's scripts/ (clients/ is plural --
+        # see clients/README.md), found by walking rather than named one by one.
+        find scripts clients -name '*.sh' -print0 | xargs -0 shellcheck --severity=warning
+        )
+        MEMQL_CHECK
+    - name: deployment-observer
+      placement: cluster
+      timeout: 45m
+      run: |
+        set -eu
+        bash <<'MEMQL_CHECK'
+        set -euo pipefail
+        export GOTOOLCHAIN=go1.26.6 GOMAXPROCS=2 GOFLAGS=-p=2
+
+        # check
+        (
+        python3 -m unittest discover -s scripts/notifications -v
+        )
+
+        # check
+        (
+        kubectl kustomize deploy/notifications > /dev/null
+        )
+        MEMQL_CHECK
+    - name: init-smoke-demo
+      placement: cluster
+      timeout: 45m
+      run: |
+        set -eu
+        bash <<'MEMQL_CHECK'
+        set -euo pipefail
+        export GOTOOLCHAIN=go1.26.6 GOMAXPROCS=2 GOFLAGS=-p=2
+        export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_TERMINAL_PROMPT=0
+        export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$PWD"
+        export PRODUCT=demo
+
+        # stamp the product in a temp copy
+        (
+        set -euo pipefail
+        stamp_dir="$(mktemp -d)"
+        tar --exclude=.git --exclude=node_modules -cf - . | tar -xf - -C "$stamp_dir"
+        cd "$stamp_dir"
+        # Regression guard (#15): plant a NON-template file carrying every
+        # template token. substitute_tree walks only the template-owned
+        # CAP_STAMP_PATHS, so a product repo's own non-template content must
+        # survive the stamp byte-for-byte. Asserted below.
+        mkdir -p product-content
+        printf '__PRODUCT_ID__ __PRODUCT_CAMEL__ __PRODUCT__ __PRODUCT_ORG__ __DOMAIN__ __ENGINE_REF__ __REGISTRY__\n' \
+          > product-content/notes.md
+        scripts/init.sh --product="$PRODUCT" --product-org=demo-org --domain=demo.local --skip-clones \
+          | tee /tmp/init.json
+        jq -e --arg p "$PRODUCT" '.ok == true and .changed == true and .result.product == $p' /tmp/init.json > /dev/null
+        printf '%s' "$stamp_dir" > /tmp/stamp-dir
+        )
+        export STAMP_DIR="$(cat /tmp/stamp-dir)"
+
+        # non-template content is left untouched (scoped stamping) (#15)
+        (
+        set -euo pipefail
+        cd "$STAMP_DIR"
+        expected='__PRODUCT_ID__ __PRODUCT_CAMEL__ __PRODUCT__ __PRODUCT_ORG__ __DOMAIN__ __ENGINE_REF__ __REGISTRY__'
+        got="$(cat product-content/notes.md)"
+        [ "$got" = "$expected" ] || { echo "ERROR: substitute_tree rewrote non-template content: '$got'" >&2; exit 1; }
+        rm -rf product-content
+        )
+
+        # zero leftover tokens (zero tolerance)
+        (
+        cd "$STAMP_DIR"
+        if grep -rn --exclude-dir=node_modules \
+            '__PRODUCT_ID__\|__PRODUCT_CAMEL__\|__PRODUCT__\|__PRODUCT_ORG__\|__DOMAIN__\|__ENGINE_REF__\|__ENGINE_VERSION__\|__REGISTRY__' . \
+            | grep -vE '^\./scripts/'; then
+          echo "ERROR: unsubstituted template token in the stamped product" >&2
+          exit 1
+        fi
+        )
+
+        # zero source-product leakage (copresent|visionarys|fylo)
+        (
+        cd "$STAMP_DIR"
+        if grep -rniE 'copresent|visionarys|fylo' .; then
+          echo "ERROR: source-product name leaked into the stamped product" >&2
+          exit 1
+        fi
+        )
+
+        # structural assertions (renames + product.env + prune + clients layout)
+        (
+        cd "$STAMP_DIR"
+        test -d "dsl/${PRODUCT//-/_}"
+        test ! -e dsl/__PRODUCT_ID__
+        # clients/ is plural and `client/` singular is retired
+        # (znasllc-io/memql#3325): the stamped tree must carry the plural
+        # layout and no singular leftover.
+        test -d clients/web
+        test -f clients/README.md
+        test ! -e client
+        test -f deploy/k8s/base/clients-web.yaml
+        # The domain directory IS the identifier-safe namespace. A fresh
+        # starter needs no directory/namespace override, even for demo-app.
+        test ! -e "dsl/${PRODUCT//-/_}/namespace.pin"
+        # ONE INSTALLATION SHAPE (engine epic znasllc-io/memql#3943): exactly
+        # two overlays (local + cloud) and exactly one committed ArgoCD
+        # Application (the cloud one; the local Application is registered by
+        # `make up`, not committed). Closed-set assertions, so an overlay or
+        # an Application added to stand for an environment fails here by name.
+        test "$(ls deploy/k8s/overlays | sort | tr '\n' ' ')" = "cloud local "
+        test "$(ls deploy/argocd/apps)" = "$PRODUCT-cloud.yaml"
+        test -f product.env && grep -qx "PRODUCT=$PRODUCT" product.env
+        test ! -e product.env.example
+        test ! -e .github/workflows/template-ci.yml   # pruned in the stamped copy
+        )
+
+        # Makefile parse smoke (stamped) (#34)
+        (
+        cd "$STAMP_DIR"
+        make -n help > /dev/null
+        )
+
+        # memqllint the stamped DSL root (engine-parity tier) (#36)
+        (
+        set -euo pipefail
+        cd "$STAMP_DIR"
+        # shellcheck disable=SC1091
+        . ./product.env
+        ref="${ENGINE_REF:?stamped product.env must pin ENGINE_REF}"
+        echo "engine ref: $ref"
+        git clone --depth 1 --branch "$ref" https://github.com/znasllc-io/memql.git /tmp/memql-lint \
+          || { echo "ERROR: failed to clone engine at ref '$ref'" >&2; exit 1; }
+        ( cd /tmp/memql-lint && go run ./cmd/memqllint "$STAMP_DIR/dsl" )
+        ( cd /tmp/memql-lint && go run ./cmd/memqlmigrate -check \
+          --rewrite=language-line,expressions,bodies,attributes,attributes-namespace "$STAMP_DIR/dsl" )
+        )
+
+        # two stamped products load together (#48)
+        (
+        python3 scripts/ci/starter_coexistence.py --engine-root=/tmp/memql-lint
+        )
+
+        # kustomize renders every overlay (stamped)
+        (
+        for o in local cloud; do
+          echo "==> render deploy/k8s/overlays/$o"
+          kubectl kustomize "$STAMP_DIR/deploy/k8s/overlays/$o" > /dev/null
+        done
+        )
+
+        # cloud render with identity ENABLED (B2)
+        (
+        set -euo pipefail
+        for o in cloud; do
+          kubectl kustomize "$STAMP_DIR/deploy/k8s/overlays/$o" > "/tmp/render-$o.yaml"
+          v="$(grep -A1 'name: MEMQL_IDENTITY_ENABLED' "/tmp/render-$o.yaml" | grep -m1 'value:' | sed 's/.*value: *//; s/"//g')"
+          [ "$v" = "true" ] || { echo "ERROR: $o renders MEMQL_IDENTITY_ENABLED=$v (want true)" >&2; exit 1; }
+        done
+        )
+
+        # product bff CORS origin is concrete, never wildcard (#16)
+        (
+        set -euo pipefail
+        for o in local cloud; do
+          kubectl kustomize "$STAMP_DIR/deploy/k8s/overlays/$o" > "/tmp/cors-$o.yaml"
+          v="$(grep -A1 'name: MEMQL_SERVER_ALLOWED_ORIGINS' "/tmp/cors-$o.yaml" | grep -m1 'value:' | sed 's/.*value: *//; s/"//g')"
+          case "$v" in
+            ""|"*") echo "ERROR: $o renders SERVER_ALLOWED_ORIGINS='$v' (want a concrete non-wildcard origin)" >&2; exit 1 ;;
+          esac
+          echo "$o: MEMQL_SERVER_ALLOWED_ORIGINS=$v"
+        done
+        )
+
+        # every client surface installs + typechecks + builds + lints (stamped)
+        (
+        set -euo pipefail
+        cd "$STAMP_DIR"
+        surfaces="$(find clients -mindepth 1 -maxdepth 1 -type d | sort)"
+        [ -n "$surfaces" ] || { echo "ERROR: stamped tree has no client surfaces under clients/" >&2; exit 1; }
+        for dir in $surfaces; do
+          echo "::group::$dir"
+          ( cd "$dir" && npm install --no-audit --no-fund && npm run typecheck && npm run build && npm run lint )
+          echo "::endgroup::"
+        done
+        )
+
+        # idempotent re-run reports changed:false
+        (
+        cd "$STAMP_DIR"
+        scripts/init.sh --product="$PRODUCT" --product-org=demo-org --domain=demo.local --skip-clones \
+          | jq -e '.ok == true and .changed == false' > /dev/null
+        )
+
+        # re-stamp with a different identity is refused (exit 3, no mutation) (B1)
+        (
+        set -uo pipefail
+        cd "$STAMP_DIR"
+        before="$(find . -path './clients/*/node_modules' -prune -o -type f -print | sort | xargs cksum 2>/dev/null | cksum)"
+        set +e
+        out="$(scripts/init.sh --product=other --product-org=demo-org --skip-clones 2>/dev/null)"; code=$?
+        set -e
+        after="$(find . -path './clients/*/node_modules' -prune -o -type f -print | sort | xargs cksum 2>/dev/null | cksum)"
+        [ "$code" -eq 3 ] || { echo "ERROR: identity change exit=$code (want 3)" >&2; exit 1; }
+        echo "$out" | jq -e '.ok == false and .error.code == 3' > /dev/null
+        [ "$before" = "$after" ] || { echo "ERROR: refused re-run mutated the tree" >&2; exit 1; }
+        )
+
+        # Stamping installs only the product recipe and remains idempotent.
+        test ! -e "$STAMP_DIR/.template"
+        grep -qx "name: $PRODUCT" "$STAMP_DIR/memql-package.yaml"
+        ! grep -q "name: init-smoke" "$STAMP_DIR/memql-package.yaml"
+        MEMQL_CHECK
+      memoryMiB: 4096
+    - name: init-smoke-demo-app
+      placement: cluster
+      timeout: 45m
+      run: |
+        set -eu
+        bash <<'MEMQL_CHECK'
+        set -euo pipefail
+        export GOTOOLCHAIN=go1.26.6 GOMAXPROCS=2 GOFLAGS=-p=2
+        export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_TERMINAL_PROMPT=0
+        export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$PWD"
+        export PRODUCT=demo-app
+
+        # stamp the product in a temp copy
+        (
+        set -euo pipefail
+        stamp_dir="$(mktemp -d)"
+        tar --exclude=.git --exclude=node_modules -cf - . | tar -xf - -C "$stamp_dir"
+        cd "$stamp_dir"
+        # Regression guard (#15): plant a NON-template file carrying every
+        # template token. substitute_tree walks only the template-owned
+        # CAP_STAMP_PATHS, so a product repo's own non-template content must
+        # survive the stamp byte-for-byte. Asserted below.
+        mkdir -p product-content
+        printf '__PRODUCT_ID__ __PRODUCT_CAMEL__ __PRODUCT__ __PRODUCT_ORG__ __DOMAIN__ __ENGINE_REF__ __REGISTRY__\n' \
+          > product-content/notes.md
+        scripts/init.sh --product="$PRODUCT" --product-org=demo-org --domain=demo.local --skip-clones \
+          | tee /tmp/init.json
+        jq -e --arg p "$PRODUCT" '.ok == true and .changed == true and .result.product == $p' /tmp/init.json > /dev/null
+        printf '%s' "$stamp_dir" > /tmp/stamp-dir
+        )
+        export STAMP_DIR="$(cat /tmp/stamp-dir)"
+
+        # non-template content is left untouched (scoped stamping) (#15)
+        (
+        set -euo pipefail
+        cd "$STAMP_DIR"
+        expected='__PRODUCT_ID__ __PRODUCT_CAMEL__ __PRODUCT__ __PRODUCT_ORG__ __DOMAIN__ __ENGINE_REF__ __REGISTRY__'
+        got="$(cat product-content/notes.md)"
+        [ "$got" = "$expected" ] || { echo "ERROR: substitute_tree rewrote non-template content: '$got'" >&2; exit 1; }
+        rm -rf product-content
+        )
+
+        # zero leftover tokens (zero tolerance)
+        (
+        cd "$STAMP_DIR"
+        if grep -rn --exclude-dir=node_modules \
+            '__PRODUCT_ID__\|__PRODUCT_CAMEL__\|__PRODUCT__\|__PRODUCT_ORG__\|__DOMAIN__\|__ENGINE_REF__\|__ENGINE_VERSION__\|__REGISTRY__' . \
+            | grep -vE '^\./scripts/'; then
+          echo "ERROR: unsubstituted template token in the stamped product" >&2
+          exit 1
+        fi
+        )
+
+        # zero source-product leakage (copresent|visionarys|fylo)
+        (
+        cd "$STAMP_DIR"
+        if grep -rniE 'copresent|visionarys|fylo' .; then
+          echo "ERROR: source-product name leaked into the stamped product" >&2
+          exit 1
+        fi
+        )
+
+        # structural assertions (renames + product.env + prune + clients layout)
+        (
+        cd "$STAMP_DIR"
+        test -d "dsl/${PRODUCT//-/_}"
+        test ! -e dsl/__PRODUCT_ID__
+        # clients/ is plural and `client/` singular is retired
+        # (znasllc-io/memql#3325): the stamped tree must carry the plural
+        # layout and no singular leftover.
+        test -d clients/web
+        test -f clients/README.md
+        test ! -e client
+        test -f deploy/k8s/base/clients-web.yaml
+        # The domain directory IS the identifier-safe namespace. A fresh
+        # starter needs no directory/namespace override, even for demo-app.
+        test ! -e "dsl/${PRODUCT//-/_}/namespace.pin"
+        # ONE INSTALLATION SHAPE (engine epic znasllc-io/memql#3943): exactly
+        # two overlays (local + cloud) and exactly one committed ArgoCD
+        # Application (the cloud one; the local Application is registered by
+        # `make up`, not committed). Closed-set assertions, so an overlay or
+        # an Application added to stand for an environment fails here by name.
+        test "$(ls deploy/k8s/overlays | sort | tr '\n' ' ')" = "cloud local "
+        test "$(ls deploy/argocd/apps)" = "$PRODUCT-cloud.yaml"
+        test -f product.env && grep -qx "PRODUCT=$PRODUCT" product.env
+        test ! -e product.env.example
+        test ! -e .github/workflows/template-ci.yml   # pruned in the stamped copy
+        )
+
+        # Makefile parse smoke (stamped) (#34)
+        (
+        cd "$STAMP_DIR"
+        make -n help > /dev/null
+        )
+
+        # memqllint the stamped DSL root (engine-parity tier) (#36)
+        (
+        set -euo pipefail
+        cd "$STAMP_DIR"
+        # shellcheck disable=SC1091
+        . ./product.env
+        ref="${ENGINE_REF:?stamped product.env must pin ENGINE_REF}"
+        echo "engine ref: $ref"
+        git clone --depth 1 --branch "$ref" https://github.com/znasllc-io/memql.git /tmp/memql-lint \
+          || { echo "ERROR: failed to clone engine at ref '$ref'" >&2; exit 1; }
+        ( cd /tmp/memql-lint && go run ./cmd/memqllint "$STAMP_DIR/dsl" )
+        ( cd /tmp/memql-lint && go run ./cmd/memqlmigrate -check \
+          --rewrite=language-line,expressions,bodies,attributes,attributes-namespace "$STAMP_DIR/dsl" )
+        )
+
+        # two stamped products load together (#48)
+        (
+        python3 scripts/ci/starter_coexistence.py --engine-root=/tmp/memql-lint
+        )
+
+        # kustomize renders every overlay (stamped)
+        (
+        for o in local cloud; do
+          echo "==> render deploy/k8s/overlays/$o"
+          kubectl kustomize "$STAMP_DIR/deploy/k8s/overlays/$o" > /dev/null
+        done
+        )
+
+        # cloud render with identity ENABLED (B2)
+        (
+        set -euo pipefail
+        for o in cloud; do
+          kubectl kustomize "$STAMP_DIR/deploy/k8s/overlays/$o" > "/tmp/render-$o.yaml"
+          v="$(grep -A1 'name: MEMQL_IDENTITY_ENABLED' "/tmp/render-$o.yaml" | grep -m1 'value:' | sed 's/.*value: *//; s/"//g')"
+          [ "$v" = "true" ] || { echo "ERROR: $o renders MEMQL_IDENTITY_ENABLED=$v (want true)" >&2; exit 1; }
+        done
+        )
+
+        # product bff CORS origin is concrete, never wildcard (#16)
+        (
+        set -euo pipefail
+        for o in local cloud; do
+          kubectl kustomize "$STAMP_DIR/deploy/k8s/overlays/$o" > "/tmp/cors-$o.yaml"
+          v="$(grep -A1 'name: MEMQL_SERVER_ALLOWED_ORIGINS' "/tmp/cors-$o.yaml" | grep -m1 'value:' | sed 's/.*value: *//; s/"//g')"
+          case "$v" in
+            ""|"*") echo "ERROR: $o renders SERVER_ALLOWED_ORIGINS='$v' (want a concrete non-wildcard origin)" >&2; exit 1 ;;
+          esac
+          echo "$o: MEMQL_SERVER_ALLOWED_ORIGINS=$v"
+        done
+        )
+
+        # every client surface installs + typechecks + builds + lints (stamped)
+        (
+        set -euo pipefail
+        cd "$STAMP_DIR"
+        surfaces="$(find clients -mindepth 1 -maxdepth 1 -type d | sort)"
+        [ -n "$surfaces" ] || { echo "ERROR: stamped tree has no client surfaces under clients/" >&2; exit 1; }
+        for dir in $surfaces; do
+          echo "::group::$dir"
+          ( cd "$dir" && npm install --no-audit --no-fund && npm run typecheck && npm run build && npm run lint )
+          echo "::endgroup::"
+        done
+        )
+
+        # idempotent re-run reports changed:false
+        (
+        cd "$STAMP_DIR"
+        scripts/init.sh --product="$PRODUCT" --product-org=demo-org --domain=demo.local --skip-clones \
+          | jq -e '.ok == true and .changed == false' > /dev/null
+        )
+
+        # re-stamp with a different identity is refused (exit 3, no mutation) (B1)
+        (
+        set -uo pipefail
+        cd "$STAMP_DIR"
+        before="$(find . -path './clients/*/node_modules' -prune -o -type f -print | sort | xargs cksum 2>/dev/null | cksum)"
+        set +e
+        out="$(scripts/init.sh --product=other --product-org=demo-org --skip-clones 2>/dev/null)"; code=$?
+        set -e
+        after="$(find . -path './clients/*/node_modules' -prune -o -type f -print | sort | xargs cksum 2>/dev/null | cksum)"
+        [ "$code" -eq 3 ] || { echo "ERROR: identity change exit=$code (want 3)" >&2; exit 1; }
+        echo "$out" | jq -e '.ok == false and .error.code == 3' > /dev/null
+        [ "$before" = "$after" ] || { echo "ERROR: refused re-run mutated the tree" >&2; exit 1; }
+        )
+
+        # Stamping installs only the product recipe and remains idempotent.
+        test ! -e "$STAMP_DIR/.template"
+        grep -qx "name: $PRODUCT" "$STAMP_DIR/memql-package.yaml"
+        ! grep -q "name: init-smoke" "$STAMP_DIR/memql-package.yaml"
+        MEMQL_CHECK
+      memoryMiB: 4096
+  - name: secrets-current
+    runAfterFailure: true
+    'on':
+    - pull_request
+    steps:
+    - name: gitleaks
+      placement: cluster
+      timeout: 45m
+      run: |
+        set -eu
+        bash <<'MEMQL_CHECK'
+        set -euo pipefail
+        export GOTOOLCHAIN=go1.26.6 GOMAXPROCS=2 GOFLAGS=-p=2
+
+        # secret scan
+        (
+        export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_TERMINAL_PROMPT=0
+        export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$PWD"
+        mkdir -p .memql-security/gitleaks
+        go install github.com/zricethezav/gitleaks/v8@v8.30.1
+        export PATH="$(go env GOPATH)/bin:$PATH"
+        gitleaks dir . --no-banner --redact=100 --report-format=json --report-path=.memql-security/gitleaks/findings.json
+        )
+        MEMQL_CHECK
+      memoryMiB: 4096
+      artifacts:
+      - .memql-security/gitleaks
+  - name: secrets-history
+    runAfterFailure: true
+    'on':
+    - push
+    - merge_group
+    - release
+    steps:
+    - name: gitleaks
+      placement: cluster
+      timeout: 45m
+      run: |
+        set -eu
+        bash <<'MEMQL_CHECK'
+        set -euo pipefail
+        export GOTOOLCHAIN=go1.26.6 GOMAXPROCS=2 GOFLAGS=-p=2
+
+        # secret scan
+        (
+        export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_TERMINAL_PROMPT=0
+        export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$PWD"
+        mkdir -p .memql-security/gitleaks
+        go install github.com/zricethezav/gitleaks/v8@v8.30.1
+        export PATH="$(go env GOPATH)/bin:$PATH"
+        [[ "$MEMQL_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
+        [[ "$MEMQL_SHA" =~ ^[0-9a-f]{40}$ ]]
+        if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+         git -c credential.helper= fetch --unshallow --tags "https://github.com/$MEMQL_REPOSITORY.git" "$MEMQL_SHA"
+        else
+         git -c credential.helper= fetch --tags "https://github.com/$MEMQL_REPOSITORY.git" "$MEMQL_SHA"
+        fi
+        test "$(git rev-parse HEAD)" = "$MEMQL_SHA"
+        gitleaks git . --no-banner --redact=100 --report-format=json --report-path=.memql-security/gitleaks/findings.json
+        )
+        MEMQL_CHECK
+      memoryMiB: 4096
+      artifacts:
+      - .memql-security/gitleaks
