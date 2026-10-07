@@ -472,7 +472,7 @@ function materialize_product_pipeline() {
         cp "$source" "$ROOT/memql-package.yaml"
         rm "$source"
         rmdir "$ROOT/.template"
-        cap_step "materialized the product pipeline recipe"
+        cap_step "wrote the product pipeline manifest"
         cap_changed
     fi
 }
@@ -488,7 +488,8 @@ function print_dry_run_plan() {
     cap_info "registry:     ${REGISTRY_VALUE:-<empty: local-only>}"
     cap_info "would write:  product.env"
     if [[ -f "$ROOT/.template/memql-package.yaml" ]]; then
-        cap_info "would copy:   .template/memql-package.yaml -> memql-package.yaml; consume the template recipe"
+        cap_info "would copy:   .template/memql-package.yaml -> memql-package.yaml"
+        cap_info "would remove: .template/ (consumed product recipe)"
     fi
     cap_info "would rename: dsl/__PRODUCT_ID__/ -> dsl/$PRODUCT_ID/, deploy/argocd/apps/__PRODUCT__-*.yaml"
     cap_info "would stamp:  dsl/, deploy/, clients/ (every surface: src+manifests+docs), ONBOARDING.md, CLAUDE.md, memql-package.yaml"
