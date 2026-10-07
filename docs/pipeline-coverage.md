@@ -16,6 +16,18 @@ workflow dispatcher in a native helper. See the engine's
 Product recipes belong in `dsl/`; native code supplies protocol and host
 operations that those recipes compose.
 
+Both the template recipe and the generated product recipe require an engine
+release containing [memql#5883](https://github.com/znasllc-io/memql/pull/5883)
+(merge commit `82c37723251d016bca6a8589f50caed67e1dfbca`) or a later descendant
+with those contracts. This is the minimum source revision, not a released
+version number. Older strict package parsers reject `runAfterFailure` and
+`memoryMiB`, including when analyzing a generated product for deployment.
+Successful DSL lint against an older `ENGINE_REF` does not qualify the package
+manifest or pipeline execution. Stamping preserves the chosen runtime pin;
+install and qualify a compatible engine before analyzing, importing or enabling
+either recipe. Keep this template change in draft until that prerequisite is
+available to generated products.
+
 ## Workflow inventory
 
 All existing GitHub workflows remain enabled until installed qualification,
