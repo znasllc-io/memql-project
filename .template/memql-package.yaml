@@ -1,4 +1,5 @@
 # Product checks run through the installed MemQL workflow.
+# Requires an engine containing memql#5883; see docs/pipeline-coverage.md.
 formatVersion: 1
 name: __PRODUCT__
 pipeline:
