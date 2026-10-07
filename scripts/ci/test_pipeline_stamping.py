@@ -51,6 +51,33 @@ class PipelineStamping(unittest.TestCase):
         self.assertFalse(json.loads(result.stdout)["changed"])
         self.assertEqual([p.read_bytes() for p in paths], before)
 
+    def test_template_sync_cannot_replace_an_existing_product_recipe(self):
+        first = self.stamp()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        manifest = self.root / "memql-package.yaml"
+        manifest.write_text(manifest.read_text() + "\n# Owner-selected pipeline policy.\n")
+        source = self.root / ".template/memql-package.yaml"
+        source.parent.mkdir()
+        source.write_text("name: __PRODUCT__\npipeline: {stages: []}\n")
+        paths = [manifest, source]
+        before = [p.read_bytes() for p in paths]
+        for flags in [("--dry-run",), ()]:
+            with self.subTest(flags=flags):
+                result = self.stamp(*flags)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(json.loads(result.stdout)["changed"])
+                self.assertNotIn("would copy:", result.stderr)
+                self.assertEqual([p.read_bytes() for p in paths], before)
+
+    def test_first_stamp_preserves_other_template_assets(self):
+        extra = self.root / ".template/another-recipe.yaml"
+        extra.write_text("name: retained-template-asset\n")
+        result = self.stamp()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("name: demo-app\n", (self.root / "memql-package.yaml").read_text())
+        self.assertFalse((self.root / ".template/memql-package.yaml").exists())
+        self.assertEqual(extra.read_text(), "name: retained-template-asset\n")
+
 
 if __name__ == "__main__":
     unittest.main()

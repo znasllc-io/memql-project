@@ -3,7 +3,9 @@
 The root `memql-package.yaml` declares this template's checks. During the first
 stamp, `scripts/init.sh` copies `.template/memql-package.yaml` into the product
 root, removes that consumed source, then substitutes the product identity.
-Subsequent stamps preserve the owner's manifest changes. A dry run changes
+Subsequent stamps preserve the owner's manifest changes, including when a
+template sync reintroduces the starter recipe. Other `.template/` assets remain
+in place after the consumed recipe is removed. A dry run changes
 neither recipe. This keeps template-only assertions out of generated products.
 
 Both recipes use the engine's installed `runPipelineStages` MemQL automation
@@ -31,7 +33,7 @@ a GitHub App, grant repository access or authorize publishing.
 | `template-drift.yml` | No equivalent declared | Weekly/manual comparison with the selected upstream template revision. |
 
 The common product recipe is shipped as data, not constructed in Go. The
-stamper only copies that declared recipe; its existence check is mechanical
+stamper only copies that declared recipe before `product.env` exists; this is mechanical
 idempotency. The pipeline uses the pinned ARM64 toolchain, Go 1.26.6 and an
 SHA-256-verified official ShellCheck 0.11.0 binary. Security still runs after
 an earlier failure and cannot clear that failure.
@@ -41,7 +43,8 @@ an earlier failure and cannot clear that failure.
 `python3 -m unittest discover -s scripts/ci -p 'test_pipeline_stamping.py'`
 proves first-stamp replacement, identifier substitution, consumed-artifact
 removal, no mutation in a dry run, preservation of owner policy on repeat
-stamps, and refusal of a changed identity without manifest mutation.
+stamps even after the source is reintroduced, preservation of other template
+assets, and refusal of a changed identity without manifest mutation.
 
 Run the existing capability suite with
 `python3 -m unittest discover -s scripts/ci -p 'test_capability_conformance.py'`.

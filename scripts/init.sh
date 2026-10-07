@@ -465,13 +465,15 @@ function prune_template_artifacts() {
 }
 
 # Materialize the template-owned product recipe before ordinary token stamping.
-# The source's existence is an idempotency check; pipeline policy stays in YAML.
+# Only an unstamped checkout may replace the template's root recipe. A later
+# template sync may restore the source, but must preserve the owner's policy.
 function materialize_product_pipeline() {
     local source="$ROOT/.template/memql-package.yaml"
+    [[ ! -f "$ROOT/product.env" ]] || return 0
     if [[ -f "$source" ]]; then
         cp "$source" "$ROOT/memql-package.yaml"
         rm "$source"
-        rmdir "$ROOT/.template"
+        rmdir "$ROOT/.template" 2>/dev/null || true
         cap_step "wrote the product pipeline manifest"
         cap_changed
     fi
@@ -487,9 +489,9 @@ function print_dry_run_plan() {
     cap_info "engine ref:   $RESOLVED_ENGINE_REF"
     cap_info "registry:     ${REGISTRY_VALUE:-<empty: local-only>}"
     cap_info "would write:  product.env"
-    if [[ -f "$ROOT/.template/memql-package.yaml" ]]; then
+    if [[ ! -f "$ROOT/product.env" && -f "$ROOT/.template/memql-package.yaml" ]]; then
         cap_info "would copy:   .template/memql-package.yaml -> memql-package.yaml"
-        cap_info "would remove: .template/ (consumed product recipe)"
+        cap_info "would remove: .template/memql-package.yaml; .template/ if empty"
     fi
     cap_info "would rename: dsl/__PRODUCT_ID__/ -> dsl/$PRODUCT_ID/, deploy/argocd/apps/__PRODUCT__-*.yaml"
     cap_info "would stamp:  dsl/, deploy/, clients/ (every surface: src+manifests+docs), ONBOARDING.md, CLAUDE.md, memql-package.yaml"
