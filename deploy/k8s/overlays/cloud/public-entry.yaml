@@ -62,6 +62,12 @@ metadata:
     cert-manager.io/cluster-issuer: letsencrypt-prod
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # With no ready endpoint, ingress-nginx answers from the engine's
+    # error-pages Service (engine v0.25.1+, cloud-entry), resolved in this
+    # Ingress's own namespace. app.<domain> is a site, so it gets the neutral
+    # page. Only this plain-HTTP Ingress carries it: behind the HTTPS identity
+    # Ingresses and the gRPC one, a plain-HTTP page server would answer 502.
+    nginx.ingress.kubernetes.io/default-backend: error-pages
 spec:
   ingressClassName: nginx
   tls:
