@@ -36,3 +36,8 @@ go.work.sum
 
 # Python verification tools
 __pycache__/
+
+# Isolated pipeline tools, results and Python test caches.
+.memql-ci/
+.memql-security/
+__pycache__/
