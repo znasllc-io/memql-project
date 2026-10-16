@@ -39,14 +39,14 @@ a GitHub App, grant repository access or authorize publishing.
 | `ci.yml` | Product ShellCheck, capability contracts, client build/typecheck/lint/test, local/cloud render/digest gates and product DSL lint; template ShellCheck and capability contracts | Installed candidate checks and required-check identity. Product checks use full selection rather than legacy path-filter skips. |
 | `template-ci.yml` | Make parse; complete `demo` and `demo-app` stamping assertions, token isolation, layout, DSL lint/migration/coexistence, renders/CORS, clients, repeat stamp and refused identity change; manifest replacement regression | Execute both matrix recipes on the pinned container. The separate stamped-DSL job's lint assertion is covered inside both matrix recipes. |
 | `deployment-observer-tests.yml` | Observer Python tests and render | Installed check delivery. |
-| `gitleaks.yml` | v8.30.1 current-tree PR scan and full-history push/merge-candidate/release scan; redacted report retained | Weekly trigger and installed full-history execution. |
+| `gitleaks.yml` | v8.30.1 introduced-commit scan on PR/push/merge candidates; weekly and release full-history scans; redacted coverage receipts retained | Weekly trigger and installed full-history execution. |
 | `publish-images.yml` | No publication equivalent declared | Manual registry/tag/build arguments, authorized image builds/push and coherent immutable release lockfile. |
 | `engine-version-watch.yml` | No equivalent declared | Weekly/manual released-engine lookup and authorized bump PR creation. |
 | `template-drift.yml` | No equivalent declared | Weekly/manual comparison with the selected upstream template revision. |
 
 The common product recipe is shipped as data, not constructed in Go. The
 stamper only copies that declared recipe before `product.env` exists; this is mechanical
-idempotency. The pipeline uses the pinned ARM64 toolchain, Go 1.26.6 and an
+idempotency. The pipeline uses the pinned AMD64 toolchain, Go 1.26.9 and an
 SHA-256-verified official ShellCheck 0.11.0 binary. Security still runs after
 an earlier failure and cannot clear that failure.
 
@@ -70,3 +70,16 @@ complete `demo`/`demo-app` matrix recipes. Both cases linted the stamped DSL,
 checked migration/coexistence, rendered local/cloud overlays, built and linted
 the client, and verified repeat-stamp and identity-refusal behavior. Current-tree
 and full-history Gitleaks 8.30.1 also passed (77 historical commits).
+
+## Current build-pool port
+
+The recipe now selects Linux AMD64 and Go 1.26.9. Native host declarations
+remain explicit. The daily schedule selects only opted-in stages; full-history
+secret checks run weekly and on release/manual qualification. PR, push and
+merge-candidate scans cover every introduced commit, including a secret added
+and removed before the final tree. A missing predecessor falls back to full
+history; an unreadable nonempty base fails. The bounded scanner and its
+regressions are copied from the engine, preserving failure and coverage receipts.
+These additions require an engine containing memql#6137's stage cadence; the
+Cockpit SARIF delivery step also requires memql#6146. Historical results above
+are not qualification of this rebased source or of installed execution.

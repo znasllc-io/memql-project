@@ -2,8 +2,10 @@
 formatVersion: 1
 name: memql-project
 pipeline:
-  image: ghcr.io/znasllc-io/memql-toolchain@sha256:7a457e4d96d2e7f03032a686a65d5447c3b6a78987c19d5622bdbfdc917e11fc
-  platform: linux/arm64
+  schedule: daily
+  caches: [go]
+  image: ghcr.io/znasllc-io/memql-toolchain@sha256:ae195dcff54b4f67eac2c5669612ba1a886f789fae1e6325adcfaab9679a7bf9
+  platform: linux/amd64
   stages:
   - name: checks
     steps:
@@ -18,7 +20,7 @@ pipeline:
         set -eu
         bash <<'MEMQL_CHECK'
         set -euo pipefail
-        export GOTOOLCHAIN=go1.26.6 GOMAXPROCS=2 GOFLAGS=-p=2
+        export GOTOOLCHAIN=go1.26.9 GOMAXPROCS=2 GOFLAGS=-p=2
 
         # template Makefile parses
         (
@@ -32,7 +34,7 @@ pipeline:
         set -eu
         bash <<'MEMQL_CHECK'
         set -euo pipefail
-        export GOTOOLCHAIN=go1.26.6 GOMAXPROCS=2 GOFLAGS=-p=2
+        export GOTOOLCHAIN=go1.26.9 GOMAXPROCS=2 GOFLAGS=-p=2
         export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_TERMINAL_PROMPT=0
         export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$PWD"
 
@@ -106,10 +108,10 @@ pipeline:
         set -eu
         bash <<'MEMQL_CHECK'
         set -euo pipefail
-        export GOTOOLCHAIN=go1.26.6 GOMAXPROCS=2 GOFLAGS=-p=2
+        export GOTOOLCHAIN=go1.26.9 GOMAXPROCS=2 GOFLAGS=-p=2
         mkdir -p .memql-ci/tools
-        curl -fsSL --retry 3 https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.aarch64.tar.gz -o .memql-ci/tools/shellcheck.tar.gz
-        echo '68a8133197a50beb8803f8d42f9908d1af1c5540d4bb05fdfca8c1fa47decefc  .memql-ci/tools/shellcheck.tar.gz' | sha256sum -c -
+        curl -fsSL --retry 3 https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.gz -o .memql-ci/tools/shellcheck.tar.gz
+        echo 'b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6  .memql-ci/tools/shellcheck.tar.gz' | sha256sum -c -
         tar -xzf .memql-ci/tools/shellcheck.tar.gz -C .memql-ci/tools
         export PATH="$PWD/.memql-ci/tools/shellcheck-v0.11.0:$PATH"
 
@@ -128,7 +130,7 @@ pipeline:
         set -eu
         bash <<'MEMQL_CHECK'
         set -euo pipefail
-        export GOTOOLCHAIN=go1.26.6 GOMAXPROCS=2 GOFLAGS=-p=2
+        export GOTOOLCHAIN=go1.26.9 GOMAXPROCS=2 GOFLAGS=-p=2
 
         # check
         (
@@ -147,7 +149,7 @@ pipeline:
         set -eu
         bash <<'MEMQL_CHECK'
         set -euo pipefail
-        export GOTOOLCHAIN=go1.26.6 GOMAXPROCS=2 GOFLAGS=-p=2
+        export GOTOOLCHAIN=go1.26.9 GOMAXPROCS=2 GOFLAGS=-p=2
         export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_TERMINAL_PROMPT=0
         export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$PWD"
         export PRODUCT=demo
@@ -333,7 +335,7 @@ pipeline:
         set -eu
         bash <<'MEMQL_CHECK'
         set -euo pipefail
-        export GOTOOLCHAIN=go1.26.6 GOMAXPROCS=2 GOFLAGS=-p=2
+        export GOTOOLCHAIN=go1.26.9 GOMAXPROCS=2 GOFLAGS=-p=2
         export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_TERMINAL_PROMPT=0
         export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$PWD"
         export PRODUCT=demo-app
@@ -514,8 +516,7 @@ pipeline:
       memoryMiB: 4096
   - name: secrets-current
     runAfterFailure: true
-    'on':
-    - pull_request
+    on: [pull_request, merge_group, push]
     steps:
     - name: gitleaks
       placement: cluster
@@ -524,27 +525,24 @@ pipeline:
         set -eu
         bash <<'MEMQL_CHECK'
         set -euo pipefail
-        export GOTOOLCHAIN=go1.26.6 GOMAXPROCS=2 GOFLAGS=-p=2
+        export GOTOOLCHAIN=go1.26.9 GOMAXPROCS=2 GOFLAGS=-p=2
 
         # secret scan
         (
         export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_TERMINAL_PROMPT=0
         export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$PWD"
-        mkdir -p .memql-security/gitleaks
         go install github.com/zricethezav/gitleaks/v8@v8.30.1
         export PATH="$(go env GOPATH)/bin:$PATH"
-        gitleaks dir . --no-banner --redact=100 --report-format=json --report-path=.memql-security/gitleaks/findings.json
+        python3 scripts/ci/gitleaks-history.py --head="$MEMQL_SHA" --base="$MEMQL_BASE_SHA" --fetch-remote="https://github.com/${MEMQL_REPOSITORY}.git" --gitleaks="$(command -v gitleaks)" --output-dir=.memql-security/gitleaks --jobs=2 --batch-size=8 --timeout=2400
         )
         MEMQL_CHECK
       memoryMiB: 4096
       artifacts:
       - .memql-security/gitleaks
   - name: secrets-history
+    schedule: weekly
     runAfterFailure: true
-    'on':
-    - push
-    - merge_group
-    - release
+    on: [release, schedule, manual]
     steps:
     - name: gitleaks
       placement: cluster
@@ -553,24 +551,15 @@ pipeline:
         set -eu
         bash <<'MEMQL_CHECK'
         set -euo pipefail
-        export GOTOOLCHAIN=go1.26.6 GOMAXPROCS=2 GOFLAGS=-p=2
+        export GOTOOLCHAIN=go1.26.9 GOMAXPROCS=2 GOFLAGS=-p=2
 
         # secret scan
         (
         export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_TERMINAL_PROMPT=0
         export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$PWD"
-        mkdir -p .memql-security/gitleaks
         go install github.com/zricethezav/gitleaks/v8@v8.30.1
         export PATH="$(go env GOPATH)/bin:$PATH"
-        [[ "$MEMQL_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
-        [[ "$MEMQL_SHA" =~ ^[0-9a-f]{40}$ ]]
-        if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
-         git -c credential.helper= fetch --unshallow --tags "https://github.com/$MEMQL_REPOSITORY.git" "$MEMQL_SHA"
-        else
-         git -c credential.helper= fetch --tags "https://github.com/$MEMQL_REPOSITORY.git" "$MEMQL_SHA"
-        fi
-        test "$(git rev-parse HEAD)" = "$MEMQL_SHA"
-        gitleaks git . --no-banner --redact=100 --report-format=json --report-path=.memql-security/gitleaks/findings.json
+        python3 scripts/ci/gitleaks-history.py --head="$MEMQL_SHA" --fetch-remote="https://github.com/${MEMQL_REPOSITORY}.git" --gitleaks="$(command -v gitleaks)" --output-dir=.memql-security/gitleaks --jobs=2 --batch-size=8 --timeout=2400
         )
         MEMQL_CHECK
       memoryMiB: 4096
