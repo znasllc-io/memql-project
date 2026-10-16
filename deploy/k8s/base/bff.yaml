@@ -44,6 +44,17 @@ spec:
         app.kubernetes.io/part-of: memql
         memql/node-type: bff
     spec:
+      # Prefer separate hosts when an instance runs multiple replicas. Keep
+      # this soft so a single-node local installation can still roll out.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: bff-__PRODUCT__
       volumes:
         - name: memql-ca
           secret:
