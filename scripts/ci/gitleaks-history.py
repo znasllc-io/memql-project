@@ -26,7 +26,7 @@ FINDINGS_EXIT = 10  # Gitleaks reserves 1 for scanner/partial-scan failure.
 
 
 def git(source, *args):
-    return subprocess.check_output(["git", "-C", str(source), *args], text=True).strip()
+    return subprocess.check_output(["git", "--no-replace-objects", "-C", str(source), *args], text=True).strip()
 
 
 def write_json(path, value):
@@ -39,7 +39,7 @@ def run_scanner(command, log, remaining, cancelled=None):
     # The scanner starts git. A timeout must end that owned process group too,
     # without touching any process belonging to another run on the machine.
     with subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT,
-                          start_new_session=True) as process:
+                          start_new_session=True, env={**os.environ, "GIT_NO_REPLACE_OBJECTS": "1"}) as process:
         try:
             deadline = time.monotonic() + remaining
             while True:
@@ -193,6 +193,40 @@ def fetch_history(source, head, remote, output, deadline, additional_roots=()):
         time.sleep(min(attempt * 2, max(0, deadline - time.monotonic())))
 
 
+def incremental_inventory(source, head, base, deadline):
+    """Prove the complete new-commit set without fetching excluded ancestors.
+
+    Raw commit objects retain their real parents even at a shallow boundary.
+    Stop only at the pinned base. Missing objects, a different root, or a
+    second history outside that boundary require the normal authenticated
+    history fetch; they can never turn a partial inventory into success.
+    """
+    pending, parents, reached_base = [head], {}, False
+    while pending:
+        if time.monotonic() >= deadline:
+            raise RuntimeError("history inventory deadline expired")
+        commit = pending.pop()
+        if commit == base:
+            reached_base = True
+            continue
+        if commit in parents:
+            continue
+        try:
+            raw = subprocess.check_output(
+                ["git", "--no-replace-objects", "-C", str(source), "cat-file", "commit", commit],
+                stderr=subprocess.DEVNULL,
+                timeout=max(0.01, deadline - time.monotonic()))
+        except subprocess.CalledProcessError:
+            return None
+        ancestors = [line[7:].decode("ascii") for line in raw.split(b"\n\n", 1)[0].splitlines()
+                     if line.startswith(b"parent ")]
+        if not ancestors or any(not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", p) for p in ancestors):
+            return None
+        parents[commit] = ancestors
+        pending.extend(reversed(ancestors))
+    return parents if reached_base else None
+
+
 def scan(source, head, output, config, binary, batch_size, timeout, jobs=1, fetch_remote=None, base=None):
     summary = {"status": "incomplete", "version": VERSION, "completedCommits": 0,
                "totalCommits": 0, "findings": 0, "batchSize": batch_size,
@@ -207,24 +241,31 @@ def scan(source, head, output, config, binary, batch_size, timeout, jobs=1, fetc
     try:
         if base is not None and not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", base):
             raise RuntimeError("incremental scanning requires the pinned full base commit identity")
-        if fetch_remote is not None:
-            fetch_history(source, head, fetch_remote, output, deadline, (base,) if base is not None else ())
-        if git(source, "rev-parse", "--is-shallow-repository") != "false":
-            raise RuntimeError("full-history scanning requires a complete Git history")
         head = git(source, "rev-parse", "--verify", head + "^{commit}")
         if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", head):
             raise RuntimeError("head is not a full commit identity")
-        # PR/queue/push coverage includes every new commit, even a secret
-        # introduced and deleted before HEAD. It excludes unrelated old tags.
-        # An unreadable base fails; it can never turn into an empty green scan.
-        if base is not None:
-            resolved = git(source, "rev-parse", "--verify", base + "^{commit}")
-            if resolved != base:
-                raise RuntimeError("base did not resolve to the pinned commit")
-        tags = git(source, "for-each-ref", "--format=%(refname) %(objectname)", "refs/tags") if base is None else ""
+        if git(source, "rev-parse", "HEAD") != head:
+            raise RuntimeError("history scan requires the checkout to match the pinned head")
+        proof = incremental_inventory(source, head, base, deadline) if base is not None else None
+        if proof is not None:
+            commits, tags = list(proof), ""
+            write_json(output / "inventory-proof.json", {"head": head, "base": base, "parents": proof})
+            summary["inventoryProof"] = "complete ancestry to pinned base"
+        else:
+            if fetch_remote is not None:
+                fetch_history(source, head, fetch_remote, output, deadline, (base,) if base is not None else ())
+            if git(source, "rev-parse", "--is-shallow-repository") != "false":
+                raise RuntimeError("full-history scanning requires a complete Git history")
+            # Every introduced commit is retained, including secrets removed
+            # before HEAD. Full audits additionally retain tag-only ancestry.
+            if base is not None:
+                resolved = git(source, "rev-parse", "--verify", base + "^{commit}")
+                if resolved != base:
+                    raise RuntimeError("base did not resolve to the pinned commit")
+            tags = git(source, "for-each-ref", "--format=%(refname) %(objectname)", "refs/tags") if base is None else ""
+            roots = [head, "--not", base] if base is not None else [head, *(line.split()[1] for line in tags.splitlines())]
+            commits = git(source, "rev-list", "--topo-order", *roots).splitlines()
         (output / "tags.txt").write_text(tags + "\n")
-        roots = [head, "--not", base] if base is not None else [head, *(line.split()[1] for line in tags.splitlines())]
-        commits = git(source, "rev-list", "--topo-order", *roots).splitlines()
         if (not commits and base is None) or len(set(commits)) != len(commits):
             raise RuntimeError("empty or repeated history inventory")
         inventory = "\n".join(commits) + "\n"

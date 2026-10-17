@@ -105,6 +105,71 @@ sys.exit(int(args["--exit-code"]) if fault in ("findings", "disagreement", "outs
                          {self.head, final})
         self.assertEqual(result["completedCommits"], 2)
 
+    def test_shallow_incremental_inventory_needs_no_remote_when_base_closes_every_path(self):
+        self.shallow_clone()
+        with patch.object(history, "fetch_history", side_effect=AssertionError("unnecessary remote fetch")):
+            result = history.scan(self.repo, self.head, self.output, self.config,
+                                  str(self.scanner), 1, 20, base=self.initial,
+                                  fetch_remote="https://example.invalid/private.git")
+        self.assertEqual(result["status"], "clean")
+        self.assertEqual(result["completedCommits"], 1)
+        self.assertEqual(result["inventoryProof"], "complete ancestry to pinned base")
+        proof = json.loads((self.output / "inventory-proof.json").read_text())
+        self.assertEqual(proof["parents"], {self.head: [self.initial]})
+        self.assertEqual(self.git("rev-parse", "--is-shallow-repository"), "true")
+
+    def test_shallow_missing_intermediate_commit_cannot_claim_complete_coverage(self):
+        (self.repo / "file").write_text("removed again\n")
+        self.git("commit", "-qam", "remove candidate")
+        self.head = self.git("rev-parse", "HEAD")
+        self.shallow_clone()
+        with patch.object(history, "fetch_history", side_effect=RuntimeError("private remote unavailable")) as fetch:
+            result = history.scan(self.repo, self.head, self.output, self.config,
+                                  str(self.scanner), 1, 20, base=self.initial,
+                                  fetch_remote="https://example.invalid/private.git")
+        fetch.assert_called_once()
+        self.assertEqual(result["status"], "incomplete")
+        self.assertEqual(result["completedCommits"], 0)
+        self.assertFalse((self.output / "inventory-proof.json").exists())
+
+    def test_replacement_commit_cannot_forge_the_base_boundary(self):
+        (self.repo / "file").write_text("second candidate\n")
+        self.git("commit", "-qam", "second candidate")
+        final = self.git("rev-parse", "HEAD")
+        self.git("replace", final, self.head)
+        proof = history.incremental_inventory(self.repo, final, self.initial, time.monotonic() + 20)
+        self.assertEqual(proof, {final: [self.head], self.head: [self.initial]})
+
+    def test_inventory_does_not_decode_commit_messages_as_utf8(self):
+        raw = subprocess.check_output(["git", "-C", str(self.repo), "cat-file", "commit", self.head])
+        raw = raw.split(b"\n\n", 1)[0] + b"\n\nnon-UTF8 message: \xff\n"
+        commit = subprocess.check_output(["git", "-C", str(self.repo), "hash-object", "-t", "commit", "-w", "--stdin"],
+                                         input=raw).decode().strip()
+        proof = history.incremental_inventory(self.repo, commit, self.initial, time.monotonic() + 20)
+        self.assertEqual(proof, {commit: [self.initial]})
+
+    @unittest.skipUnless(os.getenv("MEMQL_GITLEAKS_TEST_BIN"), "requires pinned real Gitleaks")
+    def test_real_shallow_scan_retains_removed_intermediate_secret_without_remote(self):
+        (self.repo / "file").write_text("SYNTHETIC_CREDENTIAL_" + "Z" * 16 + "\n")
+        self.git("commit", "-qam", "synthetic control")
+        introduced = self.git("rev-parse", "HEAD")
+        (self.repo / "file").write_text("removed\n")
+        self.git("commit", "-qam", "remove control")
+        final = self.git("rev-parse", "HEAD")
+        shallow = self.root / "depth-two"
+        subprocess.run(["git", "clone", "-q", "--depth=2", self.repo.as_uri(), str(shallow)], check=True)
+        self.repo = shallow
+        self.config.write_text("[[rules]]\nid = 'synthetic-control'\nregex = '''SYNTHETIC_CREDENTIAL_[A-Z]{16}'''\n")
+        with patch.object(history, "fetch_history", side_effect=AssertionError("unnecessary remote fetch")):
+            result = history.scan(self.repo, final, self.output, self.config,
+                                  os.environ["MEMQL_GITLEAKS_TEST_BIN"], 1, 20, jobs=2,
+                                  base=self.head, fetch_remote="https://example.invalid/private.git")
+        self.assertEqual(result["status"], "findings")
+        self.assertEqual(result["completedCommits"], 2)
+        findings = json.loads((self.output / "findings.json").read_text())
+        self.assertTrue(any(item["Commit"] == introduced for item in findings))
+        self.assertNotIn("Z" * 16, (self.output / "findings.json").read_text())
+
     def test_missing_or_malformed_base_cannot_report_clean(self):
         for base in ("f" * 40, "main", "--all"):
             with self.subTest(base=base):
