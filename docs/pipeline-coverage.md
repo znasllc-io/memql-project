@@ -84,3 +84,19 @@ regressions are copied from the engine, preserving failure and coverage receipts
 These additions require an engine containing memql#6137's stage cadence; the
 Cockpit SARIF delivery step also requires memql#6146. Historical results above
 are not qualification of this rebased source or of installed execution.
+
+An incremental scan first reads the actual parent identities in the retained
+commit objects. When every ancestry path reaches the pinned base, those objects
+prove the complete introduced-commit inventory, even if the excluded base is
+outside a shallow checkout. The scanner retains that proof and scans every
+introduced commit; Git's root diff at a shallow boundary includes the whole
+tree, so a removed intermediate secret remains detectable. Replacement refs
+are disabled for both inventory and scanning.
+
+This avoids an unnecessary unauthenticated fetch from a private repository when
+the checkout already contains every introduced commit. A missing intermediate
+object, an ancestry path that does not reach the base, or a full-history audit
+still requires the normal complete-history path. Failure to fetch that history
+remains a failed scan; this optimization does not supply private-repository
+credentials or qualify private full-history execution. See Git's
+[shallow-repository contract](https://git-scm.com/docs/shallow).
