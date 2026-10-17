@@ -542,7 +542,7 @@ pipeline:
   - name: secrets-history
     schedule: weekly
     runAfterFailure: true
-    on: [release, schedule, manual]
+    on: [schedule, manual]
     steps:
     - name: gitleaks
       placement: cluster
