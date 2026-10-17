@@ -98,7 +98,14 @@ small volume and monitor its capacity; automated retention is not implemented.
 
 Compose `deploy/notifications` at an immutable template commit. Override config.json
 with instance/cluster, the two Application names (roles engine/product), namespaces,
-public probes and approved application links. Patch RBAC namespaces when necessary.
+public probes and approved application links. `workload_namespace` remains the
+primary workload namespace. If either Application also owns infrastructure in
+another namespace, list it in `additional_workload_namespaces` and install the
+same narrow workload/pod read Role and RoleBinding there. The observer checks
+all listed workloads twice, including their rollout, intended digest, and runtime
+image evidence; an unlisted namespace or unreadable workload prevents success.
+This does not grant cluster-wide access or skip infrastructure verification.
+Patch RBAC namespaces when necessary.
 The default image is digest-pinned Python 3.12 Alpine, with no runtime package
 installation. Code/config ConfigMaps have content hashes; adoption is a deliberate
 GitOps change. The suspended base must be explicitly scaled to one after setup.

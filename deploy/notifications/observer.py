@@ -426,6 +426,19 @@ def workload_images(api, namespace, resource):
     return sorted(set(expected.values())), runtime
 
 
+def workload_namespaces(config):
+    # Infrastructure can be owned by the same Application in another namespace.
+    # Widen verification only through explicit instance configuration and RBAC.
+    extra = config.get('additional_workload_namespaces', [])
+    primary = config.get('workload_namespace')
+    if not isinstance(extra, list):
+        raise SafeFailure('workload-namespace-configuration-invalid')
+    names = [primary] + extra
+    if any(not isinstance(n, str) or not re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?', n) for n in names):
+        raise SafeFailure('workload-namespace-configuration-invalid')
+    return set(names)
+
+
 def verify_composition(config, api, apps, read_apps):
     if classify(apps, time.time(), {'stalled': 900, 'degraded': 120, 'anomalous': 300})[0] != 'ready':
         raise SafeFailure('composition-not-ready')
@@ -441,12 +454,13 @@ def verify_composition(config, api, apps, read_apps):
         resources = [r for r in app['status'].get('resources', []) if r.get('kind') in ('Deployment', 'StatefulSet', 'DaemonSet')]
         if not resources:
             raise SafeFailure('composition-workloads-missing')
+        allowed_namespaces = workload_namespaces(config)
         images = []
         for resource in resources:
-            if resource.get('namespace') != config['workload_namespace']:
+            if resource.get('namespace') not in allowed_namespaces:
                 raise SafeFailure('composition-namespace-mismatch')
-            found, runtime = workload_images(api, config['workload_namespace'], resource)
-            evidence['services'].append(resource['kind'] + '/' + resource['name'] + (' (scaled to zero)' if not found else ''))
+            found, runtime = workload_images(api, resource['namespace'], resource)
+            evidence['services'].append(resource['namespace'] + '/' + resource['kind'] + '/' + resource['name'] + (' (scaled to zero)' if not found else ''))
             images.extend(found)
             evidence['runtime'].extend(runtime)
         evidence['images'][config['applications'][app['metadata']['name']]] = sorted(set(images))
@@ -471,7 +485,7 @@ def verify_composition(config, api, apps, read_apps):
     for app in apps:
         for resource in app['status'].get('resources', []):
             if resource.get('kind') in ('Deployment', 'StatefulSet', 'DaemonSet'):
-                _, runtime = workload_images(api, config['workload_namespace'], resource)
+                _, runtime = workload_images(api, resource['namespace'], resource)
                 second_runtime.extend(runtime)
     ordered = lambda rows: sorted(encode(row) for row in rows)
     if ordered(second_runtime) != ordered(evidence['runtime']):
