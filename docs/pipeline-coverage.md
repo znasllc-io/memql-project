@@ -39,7 +39,7 @@ a GitHub App, grant repository access or authorize publishing.
 | `ci.yml` | Product ShellCheck, capability contracts, client build/typecheck/lint/test, local/cloud render/digest gates and product DSL lint; template ShellCheck and capability contracts | Installed candidate checks and required-check identity. Product checks use full selection rather than legacy path-filter skips. |
 | `template-ci.yml` | Make parse; complete `demo` and `demo-app` stamping assertions, token isolation, layout, DSL lint/migration/coexistence, renders/CORS, clients, repeat stamp and refused identity change; manifest replacement regression | Execute both matrix recipes on the pinned container. The separate stamped-DSL job's lint assertion is covered inside both matrix recipes. |
 | `deployment-observer-tests.yml` | Observer Python tests and render | Installed check delivery. |
-| `gitleaks.yml` | v8.30.1 introduced-commit scan on PR/push/merge candidates; weekly and release full-history scans; redacted coverage receipts retained | Weekly trigger and installed full-history execution. |
+| `gitleaks.yml` | v8.30.1 introduced-commit scan on PR/push/merge candidates; weekly and explicit manual full-history scans; redacted coverage receipts retained | Weekly trigger and installed full-history execution. |
 | `publish-images.yml` | No publication equivalent declared | Manual registry/tag/build arguments, authorized image builds/push and coherent immutable release lockfile. |
 | `engine-version-watch.yml` | No equivalent declared | Weekly/manual released-engine lookup and authorized bump PR creation. |
 | `template-drift.yml` | No equivalent declared | Weekly/manual comparison with the selected upstream template revision. |
@@ -75,8 +75,9 @@ and full-history Gitleaks 8.30.1 also passed (77 historical commits).
 
 The recipe now selects Linux AMD64 and Go 1.26.9. Native host declarations
 remain explicit. The daily schedule selects only opted-in stages; full-history
-secret checks run weekly and on release/manual qualification. PR, push and
-merge-candidate scans cover every introduced commit, including a secret added
+secret checks run weekly and on an explicit manual audit. Releases do not repeat
+the full-history audit. PR, push and merge-candidate scans still cover every
+introduced commit, including a secret added
 and removed before the final tree. A missing predecessor falls back to full
 history; an unreadable nonempty base fails. The bounded scanner and its
 regressions are copied from the engine, preserving failure and coverage receipts.
