@@ -254,6 +254,39 @@ class Verification(unittest.TestCase):
         self.assertEqual(set(evidence['images']), {'engine', 'product'})
         self.assertEqual(evidence['runtime'][0]['runtime'], 'containerd://sha256:' + 'b' * 64)
 
+    def test_explicit_additional_namespace_is_verified_twice(self):
+        self.config['additional_workload_namespaces'] = ['build-system']
+        self.apps[0]['status']['resources'].append({'kind': 'DaemonSet', 'name': 'profiles', 'namespace': 'build-system'})
+        observed = []
+        def read(api, namespace, resource):
+            observed.append((namespace, resource['name']))
+            return ['engine@sha256:' + 'a' * 64], [{'pod': namespace + '/one', 'runtime': 'sha256:' + 'b' * 64}]
+        with patch.object(o, 'workload_images', side_effect=read):
+            evidence = self.verify()
+        self.assertEqual(observed.count(('build-system', 'profiles')), 2)
+        self.assertIn('build-system/DaemonSet/profiles', evidence['services'])
+
+    def test_unlisted_namespace_cannot_be_skipped_or_read(self):
+        self.apps[0]['status']['resources'][0]['namespace'] = 'unexpected'
+        with patch.object(o, 'workload_images') as read:
+            with self.assertRaisesRegex(o.SafeFailure, 'composition-namespace-mismatch'):
+                self.verify()
+            read.assert_not_called()
+
+    def test_additional_namespace_failures_prevent_success(self):
+        self.config['additional_workload_namespaces'] = ['build-system']
+        self.apps[0]['status']['resources'][0]['namespace'] = 'build-system'
+        with patch.object(o, 'workload_images', side_effect=o.SafeFailure('buildkit: rollout-not-ready')):
+            with self.assertRaisesRegex(o.SafeFailure, 'rollout-not-ready'):
+                self.verify()
+
+    def test_namespace_configuration_rejects_wildcards_and_non_lists(self):
+        for extra in ['build-system', ['*'], ['../other'], [None], ['']]:
+            with self.subTest(extra=extra):
+                self.config['additional_workload_namespaces'] = extra
+                with self.assertRaisesRegex(o.SafeFailure, 'configuration-invalid'):
+                    self.verify()
+
     def test_stale_source_after_probes_rejected(self):
         changed = copy.deepcopy(self.apps)
         changed[0]['status']['sync']['revision'] = 'c' * 40
