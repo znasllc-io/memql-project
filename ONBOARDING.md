@@ -75,9 +75,14 @@ make down        # tear down the whole cluster
 cd clients/web && npm install && make dev
 ```
 
-The front door serves `https://identity.__DOMAIN__`, `https://bff.__DOMAIN__`,
-`https://app.__DOMAIN__` (portless TLS, mkcert wildcard). A private product repo
-needs `MEMQL_K3D_REPO_TOKEN=$(gh auth token)` on `make up` so ArgoCD can read it.
+The local stack is always served at `memql.__PRODUCT__.localhost`, never at
+the cloud domain (`__DOMAIN__`): `https://os.memql.__PRODUCT__.localhost`
+(MemQL OS), `https://identity.memql.__PRODUCT__.localhost`,
+`https://bff.memql.__PRODUCT__.localhost` and
+`https://app.memql.__PRODUCT__.localhost` (portless TLS, mkcert wildcard), in
+the k3d cluster `memql-__PRODUCT__`. Stop any other local stack first: every
+local cluster publishes the same host ports. A private product repo needs
+`MEMQL_K3D_REPO_TOKEN=$(gh auth token)` on `make up` so ArgoCD can read it.
 
 ## Client surfaces (plural)
 

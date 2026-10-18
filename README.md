@@ -78,23 +78,21 @@ product boots a full stack with zero engine-repo edits.**
    empty = local-only), `--engine-ref=...` to pin the engine, `--skip-clones`
    to skip the sibling clones, `--dry-run` to preview with zero mutation.
 
-   `--domain` must **match the domain the sibling engine cluster is served
-   at**. The engine no longer has a fixed local domain: `make up
-   DOMAIN=<anything>` serves whatever the operator brings, seeded as the single
-   `MEMQL_DOMAIN` key of the `memql-domain` ConfigMap that every node derives
-   its issuer, CORS origins and OAuth redirect URIs from at boot
-   (`component/envregistry/domain.go`). What is fixed is that the product's
-   local stack shares the ENGINE's identity node, so the two must agree: the
-   product's `identity.<domain>` is served by the engine Application, and a
-   mismatch means magic-link login has nothing to talk to, TLS does not match,
-   and the bff rejects every token.
+   `--domain` is the **cloud (production) domain**. It is stamped into the
+   cloud overlay's public entry and recorded as `DOMAIN` in `product.env`, and
+   nothing local reads it. The local stack is always served at
+   `memql.<product>.localhost`, an RFC 6761 loopback name derived from the
+   product name: `make up` brings the engine up at that domain in the
+   product's own k3d cluster (`memql-<product>`), seeded as the single
+   `MEMQL_DOMAIN` that every node derives its issuer, CORS origins and OAuth
+   redirect URIs from at boot (`component/envregistry/domain.go`). The engine
+   and the product therefore agree on identity by construction, and a local
+   stack can never be mistaken for, or route a browser to, production.
 
-   Both defaults are `memql.localhost` -- an RFC 6761 loopback name that
-   belongs to nobody -- so the common case is to pass nothing on either side.
-   If you brought the engine up as `make up DOMAIN=lab.example.com`, stamp
-   with `--domain=lab.example.com`. The same value is also the **cloud public
-   entry** placeholder, which you set on the cloud overlay at activation time
-   (see its activation checklist).
+   The default, `memql.localhost`, is a placeholder no CA will issue a
+   certificate for, so an unconfigured cloud overlay fails closed. Set the
+   real domain before activating the cloud overlay (see its activation
+   checklist).
 
 3. Bring up the stack (requires docker, k3d, kubectl, mkcert, and the sibling
    `../memql`):
@@ -107,8 +105,11 @@ product boots a full stack with zero engine-repo edits.**
    make -C clients/web dev   # one surface's HMR inner loop (Vite on :8080)
    ```
 
-   The front door serves `https://identity.<domain>`, `https://bff.<domain>`,
-   and `https://app.<domain>`.
+   The local front door serves `https://os.memql.<product>.localhost` (MemQL
+   OS), `https://identity.memql.<product>.localhost`,
+   `https://bff.memql.<product>.localhost` and
+   `https://app.memql.<product>.localhost`. One local stack runs at a time:
+   every local cluster publishes the same host ports.
 
 4. Read the stamped `ONBOARDING.md` for the development workflow and `CLAUDE.md`
    for the repo agent guide.
@@ -125,7 +126,7 @@ conflicts on plumbing.
 |---|---|---|
 | `__PRODUCT__` | product name (lowercase slug) | `acme` |
 | `__PRODUCT_ORG__` | GitHub org/user owning the product repo | `acme-io` |
-| `__DOMAIN__` | the domain this cluster is served at -- matches the sibling engine cluster's; also the cloud public-entry placeholder | `memql.localhost` |
+| `__DOMAIN__` | the cloud (production) domain, stamped into the cloud overlay only; the local stack is always `memql.<product>.localhost` | `memql.localhost` |
 | `__ENGINE_REF__` | engine ref pinned at stamp time (default: latest engine release tag, see below) | `0.12.1` |
 | `__REGISTRY__` | container registry for the product images | `ghcr.io/acme-io` |
 

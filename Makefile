@@ -25,12 +25,23 @@
 -include product.mk
 
 ENGINE       ?= ../memql
-# One shared local k3d cluster (the engine creates it, the product joins it).
+# The LOCAL domain: always memql.<product>.localhost, an RFC 6761 loopback name.
+# Derived from PRODUCT and deliberately not configurable (`override` ignores a
+# command-line value too), so a local stack can never be served at, or mistaken
+# for, the production one. DOMAIN in product.env is the CLOUD domain, and no
+# local step reads it. The engine bring-up seeds the cluster's MEMQL_DOMAIN with
+# this value, so every node derives its issuer, CORS origins and redirect URIs
+# from it; the local overlay and every local client image name it too.
+override LOCAL_DOMAIN := memql.$(PRODUCT).localhost
+# One local k3d cluster per product, named after it. The engine locks a cluster
+# to the domain it was created with, so a product stack never shares the
+# engine's own `memql` dev cluster. One stack runs at a time: every local
+# cluster publishes the same host ports (443, 80, 5432).
 # Overridable, but it is threaded through EVERY placement step below -- the
-# engine bring-up, the bundle import, the SPA build/import, and the product App
-# registration -- so `make up CLUSTER=x` builds ONE coherent stack on cluster x
-# instead of silently splitting it across two (C5).
-CLUSTER      ?= memql
+# engine bring-up, the bundle import, the client build/import, and the product
+# App registration -- so `make up CLUSTER=x` builds ONE coherent stack on
+# cluster x instead of silently splitting it across two (C5).
+CLUSTER      ?= memql-$(PRODUCT)
 NAMESPACE    ?= memql
 # k3d LB ports fixed at cluster-create time; 50051 = the product bff raw gRPC.
 EXTRA_PORTS  ?= 50051:50051
@@ -79,8 +90,8 @@ require-env:
 ## Bring up the whole local stack: engine mesh + this product (bff + clients + DSL).
 up: require-env
 	@test -n "$(ORIGIN_URL)" || echo "WARN: no 'origin' remote; ArgoCD repo-url falls back to $(REPO_URL) -- push this repo and confirm the URL matches, or ArgoCD will track a repo that may not exist (C12)."
-	@echo "==> [1/4] engine bring-up (cluster + ArgoCD + secrets + engine Application)"
-	$(MAKE) -C $(ENGINE) up EXTRA_PORTS=$(EXTRA_PORTS) CLUSTER=$(CLUSTER)
+	@echo "==> [1/4] engine bring-up at $(LOCAL_DOMAIN) (cluster + ArgoCD + secrets + engine Application)"
+	$(MAKE) -C $(ENGINE) up EXTRA_PORTS=$(EXTRA_PORTS) CLUSTER=$(CLUSTER) DOMAIN=$(LOCAL_DOMAIN)
 	@echo "==> [2/4] build + import the product DSL bundle image"
 	docker build -f deploy/Dockerfile.bundle -t $(BUNDLE_IMAGE) .
 	$(IMPORT) --image=$(BUNDLE_IMAGE) --cluster=$(CLUSTER) --dryRun=false
@@ -101,7 +112,7 @@ up: require-env
 		--revision=$(REVISION) \
 		--overlay-path=deploy/k8s/overlays/local \
 		--no-secrets
-	@echo "Stack up. Front door: https://app.$(DOMAIN) (clients: $(CLIENTS)), https://bff.$(DOMAIN) (bff)."
+	@echo "Stack up at $(LOCAL_DOMAIN): https://os.$(LOCAL_DOMAIN) (MemQL OS), https://bff.$(LOCAL_DOMAIN) (bff); client surfaces ($(CLIENTS)) at their deploy/k8s/overlays/local hosts."
 
 .PHONY: dev
 ## Rebuild the DSL bundle and re-mount it on the product's bff (no cluster rebuild).
@@ -181,6 +192,7 @@ render:
 help:
 	@echo ""
 	@echo "Product stack ($(if $(PRODUCT),$(PRODUCT),<uninitialized -- run scripts/init.sh>))"
+	@echo "Local stack at $(if $(PRODUCT),$(LOCAL_DOMAIN) (k3d cluster $(CLUSTER)),memql.<product>.localhost) -- never the cloud DOMAIN"
 	@echo ""
 	@echo "  make up        Bring up engine + product (bff + clients + DSL) on local k3d"
 	@echo "  make dev       Rebuild the DSL bundle and re-mount it on the bff"

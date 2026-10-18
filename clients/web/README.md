@@ -105,12 +105,14 @@ npm install
 # client surface + DSL). The STACK lifecycle lives in the repo root, not here:
 make up            # == make -C ../.. up
 
-# Attached HMR inner loop (Vite on :8080, proxies /memql to https://bff.__DOMAIN__):
+# Attached HMR inner loop (Vite on :8080, proxies /memql to https://bff.memql.__PRODUCT__.localhost):
 make dev
 ```
 
-`make dev` serves the app at http://localhost:8080; the front door is
-`https://app.__DOMAIN__`. See `Makefile` for the full target list.
+`make dev` serves the app at http://localhost:8080; the local front door is
+`https://app.memql.__PRODUCT__.localhost`. The local stack is always served at
+`memql.__PRODUCT__.localhost`, never at the cloud domain. See `Makefile` for the
+full target list.
 
 ## Build
 

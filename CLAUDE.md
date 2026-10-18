@@ -50,8 +50,8 @@ kind the doc forbids. Write **pack**.
   TARGETS of ONE installation shape -- no staging/prod dimension, a second
   environment is a second instance; engine epic memql#3943) +
   `argocd/` (the product AppProject + the one cloud Application).
-- `product.env` -- product identity (PRODUCT, PRODUCT_ORG, DOMAIN, ENGINE_REF,
-  REGISTRY). Every operational file reads it.
+- `product.env` -- product identity (PRODUCT, PRODUCT_ORG, DOMAIN -- the cloud
+  domain, ENGINE_REF, REGISTRY). Every operational file reads it.
 - `Makefile` -- the local stack lifecycle (`make up|dev|status|down`).
 
 ## How it runs (the delivery mechanism)
@@ -120,11 +120,17 @@ A `make dev` re-mounts the bundle; no Go rebuild.
   entry, a CI loop value or an `if env == ...` branch to stand for an
   environment; a second environment is a second instance with its own ArgoCD,
   domain and database (engine epic memql#3943).
-- **The domain is a value, and it is the CLUSTER's, not this product's.** The
-  engine cluster is seeded with one `MEMQL_DOMAIN` (`make up DOMAIN=...`), every
-  node derives its issuer / CORS origins / OAuth redirect URIs from it at boot,
-  and `deploy/k8s/base/bff.yaml` mounts that same `memql-domain` ConfigMap. So
-  `product.env`'s `DOMAIN` must MATCH the engine cluster's, and nothing here
-  pins a derived value -- an explicit `env` entry beats `envFrom` in Kubernetes
-  regardless of order, so re-pinning the issuer would mount the ConfigMap and
-  ignore it (engine memql#3593).
+- **Two domains, never mixed.** The LOCAL stack is always served at
+  `memql.__PRODUCT__.localhost` (the root Makefile's `LOCAL_DOMAIN`, derived
+  from `PRODUCT` and not configurable): `make up` brings the engine up at it in
+  the k3d cluster `memql-__PRODUCT__`, and the local overlay, the bff's base
+  CORS origin and every local client image name it. `product.env`'s `DOMAIN` is
+  the CLOUD domain, read by the cloud overlay only; no local step may read it,
+  or a local stack becomes indistinguishable from production.
+- **Within a cluster the domain is a value, and it is the CLUSTER's.** The
+  engine seeds one `MEMQL_DOMAIN`, every node derives its issuer / CORS origins
+  / OAuth redirect URIs from it at boot, and `deploy/k8s/base/bff.yaml` mounts
+  that same `memql-domain` ConfigMap. Nothing here pins a derived value -- an
+  explicit `env` entry beats `envFrom` in Kubernetes regardless of order, so
+  re-pinning the issuer would mount the ConfigMap and ignore it (engine
+  memql#3593).

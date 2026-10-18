@@ -206,7 +206,7 @@ jobs:
       - name: product bff CORS origin is concrete, never wildcard (#16)
         # MEMQL_SERVER_ALLOWED_ORIGINS must never render "*" on the credentialed product
         # bff (it carries user bearer tokens). Base renders the LOCAL front-door
-        # origin (https://app.<domain>); the cloud overlay OVERRIDES it to its
+        # origin (https://app.memql.<product>.localhost); the cloud overlay OVERRIDES it to its
         # public app host via identity-config.yaml. Assert EVERY overlay renders a
         # concrete, non-empty, non-wildcard origin -- the CORS half of #16.
         run: |
@@ -218,6 +218,24 @@ jobs:
               ""|"*") echo "ERROR: $o renders SERVER_ALLOWED_ORIGINS='$v' (want a concrete non-wildcard origin)" >&2; exit 1 ;;
             esac
             echo "$o: MEMQL_SERVER_ALLOWED_ORIGINS=$v"
+          done
+
+      - name: the local stack never names the cloud domain (memql-project#75)
+        # The local stack is served at memql.<product>.localhost and nowhere
+        # else, so a browser can never mistake it for production. Stamped with
+        # --domain=demo.local, so a demo.local host anywhere in the local render
+        # is the cloud domain leaking in (memql.demo.localhost does not match:
+        # the pattern needs demo.local to END there).
+        run: |
+          set -euo pipefail
+          kubectl kustomize "$STAMP_DIR/deploy/k8s/overlays/local" > /tmp/local-domain.yaml
+          if grep -nE 'demo\.local([^A-Za-z0-9-]|$)' /tmp/local-domain.yaml; then
+            echo "ERROR: the local overlay renders the cloud domain demo.local" >&2
+            exit 1
+          fi
+          for host in "bff.memql.${PRODUCT}.localhost" "app.memql.${PRODUCT}.localhost"; do
+            grep -qF "host: ${host}" /tmp/local-domain.yaml \
+              || { echo "ERROR: the local overlay does not serve ${host}" >&2; exit 1; }
           done
 
       - name: every client surface installs + typechecks + builds + lints (stamped)

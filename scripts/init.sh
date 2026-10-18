@@ -31,7 +31,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/capability.sh"
 cap_init "product.init" "Stamp this template checkout in place into a concrete memQL product: write product.env, rename + substitute tokens, clone engine + cockpit siblings, prune template artifacts."
 cap_spec_param_required "product"     "product name (^[a-z][a-z0-9-]*$; e.g. 'acme')"
 cap_spec_param_required "product-org" "GitHub org/user owning this product repo (e.g. 'acme-io')"
-cap_spec_param "domain"       "the domain this cluster is served at -- must MATCH the domain the sibling engine cluster was brought up with (engine 'make up DOMAIN=...'); also the cloud public-entry placeholder (default: memql.localhost)"
+cap_spec_param "domain"       "the CLOUD (production) domain, stamped into the cloud overlay only; the local stack is always served at memql.<product>.localhost and never reads it (default: memql.localhost, a placeholder)"
 cap_spec_param "engine-ref"   "engine ref to pin (default: the latest engine release tag, resolved at stamp time; falls back to main with a loud warning when offline)"
 cap_spec_param "registry"     "container registry for the product bundle + client-surface images (default: empty = local-only)"
 cap_spec_param "cockpit-ref"  "cockpit ref to clone (default: main)"
@@ -421,7 +421,8 @@ function replace_readme() {
         printf 'make down      # tear down\n'
         printf 'make -C clients/web dev # a client surface HMR inner loop (Vite on :8080)\n'
         printf '```\n\n'
-        printf 'The front door serves https://identity.%s, https://bff.%s, https://app.%s.\n\n' "$DOMAIN" "$DOMAIN" "$DOMAIN"
+        printf 'The local stack is always served at `memql.%s.localhost` (MemQL OS at\n' "$PRODUCT"
+        printf 'https://os.memql.%s.localhost), never at the cloud domain `%s`.\n\n' "$PRODUCT" "$DOMAIN"
         printf '## Staying in sync with the template\n\n'
         printf 'This repo was stamped from the template; operational files (Makefiles,\n'
         printf 'scripts, CI) are byte-identical to it and read `product.env`, so template\n'
@@ -485,7 +486,8 @@ function print_dry_run_plan() {
     cap_info "workspace (parent): $PARENT"
     cap_info "product:      $PRODUCT"
     cap_info "product org:  $PRODUCT_ORG"
-    cap_info "domain:       $DOMAIN"
+    cap_info "cloud domain: $DOMAIN"
+    cap_info "local domain: memql.$PRODUCT.localhost"
     cap_info "engine ref:   $RESOLVED_ENGINE_REF"
     cap_info "registry:     ${REGISTRY_VALUE:-<empty: local-only>}"
     cap_info "would write:  product.env"
@@ -507,6 +509,7 @@ function emit_result() {
     cap_result_set product "$PRODUCT"
     cap_result_set productOrg "$PRODUCT_ORG"
     cap_result_set domain "$DOMAIN"
+    cap_result_set localDomain "memql.${PRODUCT}.localhost"
     cap_result_set engineRef "$RESOLVED_ENGINE_REF"
     cap_result_set registry "$REGISTRY_VALUE"
     cap_result_set productRoot "$ROOT"
@@ -521,11 +524,13 @@ function main() {
 
     PRODUCT="$(cap_param product "")"
     PRODUCT_ORG="$(cap_param product-org "")"
-    # Default: the engine's own local default (scripts/k3d/up.sh
-    # OVERLAY_DEFAULT_DOMAIN). memql.localhost is an RFC 6761 loopback name that
-    # belongs to nobody, which is the point -- no company's domain is baked into
-    # a template (memql#3593, memql#4217). A product serving a real domain passes
-    # it as --domain and it lives in THIS repo's product.env, never upstream.
+    # The CLOUD domain only: the local stack derives memql.<product>.localhost
+    # from PRODUCT and never reads this. Default: memql.localhost, an RFC 6761
+    # loopback name that belongs to nobody and that no CA will certify, which is
+    # the point -- no company's domain is baked into a template (memql#3593,
+    # memql#4217), and an unconfigured cloud overlay fails closed. A product
+    # serving a real domain passes it as --domain and it lives in THIS repo's
+    # product.env, never upstream.
     DOMAIN="$(cap_param domain "memql.localhost")"
     ENGINE_REF="$(cap_param engine-ref "")"
     REGISTRY_VALUE="$(cap_param registry "")"
