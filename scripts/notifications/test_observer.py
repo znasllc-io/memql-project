@@ -375,6 +375,7 @@ class Verification(unittest.TestCase):
                    lambda: self.deployment['spec']['template']['spec']['nodeSelector'].update(pool='wrong'),
                    lambda: self.deployment['status'].update(currentNumberScheduled=1),
                    lambda: self.deployment['status'].update(numberMisscheduled=1),
+                   lambda: self.deployment['status'].pop('desiredNumberScheduled'),
                    lambda: self.deployment['status'].update(observedGeneration=0)]
         for change in changes:
             with self.subTest(change=change):

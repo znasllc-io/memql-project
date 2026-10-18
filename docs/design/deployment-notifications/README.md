@@ -42,6 +42,12 @@ notification plan per release. Missing applied-manifest evidence, floating image
 and selector expressions currently fail closed as unverified. Explicitly applied
 zero-replica workloads must have no remaining pods and are labeled scaled to zero,
 with no running image claim. Unexpected scale-to-zero fails closed.
+For an autoscaled background pool, an instance may name specific workloads in
+`idle_daemonsets`, for example `[{"namespace":"build-system","name":"profiles"}]`.
+A named DaemonSet is accepted without a runtime image only when its current
+controller generation reports zero desired and scheduled nodes, no Pods remain,
+and its placement rules match the applied manifest. Unlisted DaemonSets still
+require running-image evidence. This setting does not alter capacity or RBAC.
 Server-side-apply workloads without this annotation need another authoritative
 manifest source before this verifier can certify them.
 
