@@ -9,6 +9,12 @@ pipeline:
   stages:
   - name: checks
     steps:
+    - name: maintenance-contracts
+      placement: cluster
+      timeout: 5m
+      cpuMilli: 250
+      memoryMiB: 512
+      run: python3 -m unittest discover -s scripts/ci -p test_template_drift.py -v
     - name: pipeline-stamping
       placement: cluster
       timeout: 10m
@@ -605,3 +611,16 @@ pipeline:
       memoryMiB: 4096
       artifacts:
       - .memql-security/gitleaks
+
+  - name: maintenance
+    on: [schedule, manual]
+    schedule: weekly
+    runAfterFailure: true
+    steps:
+    - name: template-drift
+      placement: cluster
+      timeout: 5m
+      cpuMilli: 250
+      memoryMiB: 512
+      artifacts: [.memql-maintenance]
+      run: python3 scripts/ci/template-drift.py
