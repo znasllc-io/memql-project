@@ -22,13 +22,17 @@ REPO_ROOT="$(cd "${CLIENT_ROOT}/../.." && pwd)"
 # The surface name, derived from the directory (clients/web -> "web").
 CLIENT="$(basename "${CLIENT_ROOT}")"
 
-# Product identity from the repo-root product.env (PRODUCT, DOMAIN, ...).
+# Product identity from the repo-root product.env (PRODUCT, ...).
 # shellcheck disable=SC1091
 [ -f "${REPO_ROOT}/product.env" ] && . "${REPO_ROOT}/product.env"
 : "${PRODUCT:?PRODUCT not set -- run scripts/init.sh (product.env missing)}"
-: "${DOMAIN:?DOMAIN not set -- run scripts/init.sh (product.env missing)}"
 
-CLUSTER="${CLUSTER:-memql}"
+# The image built here runs on the LOCAL stack, so it bakes the LOCAL domain:
+# always memql.<product>.localhost, by the root Makefile's rule. DOMAIN in
+# product.env is the cloud domain and is deliberately not read.
+LOCAL_DOMAIN="memql.${PRODUCT}.localhost"
+
+CLUSTER="${CLUSTER:-memql-${PRODUCT}}"
 NAMESPACE="${NAMESPACE:-memql}"
 # <product>-<surface>: the one naming rule every layer derives from (image,
 # Deployment, Service, kustomize image key, release lockfile component).
@@ -73,8 +77,8 @@ function build_image() {
         value="${!name:-}"
         if [ -z "$value" ]; then
             case "$name" in
-                VITE_MEMQL_HTTP_URL)    value="https://bff.${DOMAIN}" ;;
-                VITE_IDENTITY_BASE_URL) value="https://identity.${DOMAIN}" ;;
+                VITE_MEMQL_HTTP_URL)    value="https://bff.${LOCAL_DOMAIN}" ;;
+                VITE_IDENTITY_BASE_URL) value="https://identity.${LOCAL_DOMAIN}" ;;
             esac
         fi
         [ -n "$value" ] && build_args+=(--build-arg "${name}=${value}")
@@ -108,7 +112,7 @@ function roll_deployment() {
     info "Rolling the ${DEPLOY_NAME} Deployment..."
     kubectl rollout restart "deploy/${DEPLOY_NAME}" -n "${NAMESPACE}" >&2
     kubectl rollout status "deploy/${DEPLOY_NAME}" -n "${NAMESPACE}" --timeout="${WAIT_TIMEOUT}s" >&2
-    info "Surface '${CLIENT}' is serving behind the front door (https://app.${DOMAIN} for the default route)."
+    info "Surface '${CLIENT}' is serving behind the front door (https://app.${LOCAL_DOMAIN} for the default route)."
 }
 
 function main() {

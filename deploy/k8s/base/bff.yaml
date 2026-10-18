@@ -146,11 +146,12 @@ spec:
             # it breaks it: every credentialed request from the SPA fails. Name the
             # origin.
             #
-            # The base value is the front-door origin for the stamped domain
-            # (app.DOMAIN, from product.env). The cloud overlay serves the SPA at
-            # its own public host and so OVERRIDES this via its
-            # identity-config.yaml patch (see the overlay activation checklist).
-            - { name: MEMQL_SERVER_ALLOWED_ORIGINS, value: "https://app.__DOMAIN__" }
+            # The base value is the LOCAL front-door origin: the local stack is
+            # always served at memql.<product>.localhost (the root Makefile's
+            # LOCAL_DOMAIN). The cloud overlay serves the SPA at its own public
+            # host and so OVERRIDES this via its identity-config.yaml patch (see
+            # the overlay activation checklist).
+            - { name: MEMQL_SERVER_ALLOWED_ORIGINS, value: "https://app.memql.__PRODUCT__.localhost" }
             # MemQL OS is served by the engine's edge node at os.<domain>.
             # The product BFF serves this product's API only (memql#5015).
             # Shared DB -- migrations run once on the engine identity node.
@@ -178,7 +179,7 @@ spec:
 ---
 # In-mesh + front-door target for the product bff (gRPC 50051, HTTP/WS 8085,
 # node 50058). The SPA reaches it through the front door; native gRPC clients
-# reach it at bff.__DOMAIN__.
+# reach it at bff.<domain>.
 apiVersion: v1
 kind: Service
 metadata:

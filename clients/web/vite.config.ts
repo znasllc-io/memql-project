@@ -6,11 +6,13 @@ import react from "@vitejs/plugin-react";
 // assumes everywhere (see MemqlClientOptions.httpUrl); in a cluster the
 // app.<domain> Ingress does the same routing.
 //
-// The proxy TARGET is a dev-server-only value, and bff.<domain> is the right
-// one LOCALLY: the local front door serves the bff's HTTP surface there. The
-// cloud entry does not (that host is raw gRPC), which is exactly why the app
-// itself must not name it.
-const MEMQL_HTTP_URL = process.env.MEMQL_HTTP_URL ?? "https://bff.__DOMAIN__";
+// The proxy TARGET is a dev-server-only value, and bff.<local domain> is the
+// right one: the local front door serves the bff's HTTP surface there, and the
+// local stack is always served at memql.<product>.localhost. The cloud entry
+// does not (that host is raw gRPC), which is exactly why the app itself must
+// not name it.
+const MEMQL_HTTP_URL =
+  process.env.MEMQL_HTTP_URL ?? "https://bff.memql.__PRODUCT__.localhost";
 
 export default defineConfig({
   plugins: [react()],

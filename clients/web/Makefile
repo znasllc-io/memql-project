@@ -18,10 +18,15 @@
 # The surface name -- this directory. Never hardcode it.
 CLIENT := $(notdir $(CURDIR))
 
+# The LOCAL domain, by the root Makefile's rule (restated because a surface's
+# dev loop also runs on its own): always memql.<product>.localhost. DOMAIN in
+# product.env is the cloud domain, and this dev loop never talks to the cloud.
+override LOCAL_DOMAIN := memql.$(PRODUCT).localhost
+
 NPM := npm
 # The bff's entry on the local front door (traefik TLS on 443;
-# bff.$(DOMAIN) -> 127.0.0.1). Vite proxies /memql here in dev.
-MEMQL_HTTP_URL ?= https://bff.$(DOMAIN)
+# bff.$(LOCAL_DOMAIN) -> 127.0.0.1). Vite proxies /memql here in dev.
+MEMQL_HTTP_URL ?= https://bff.$(LOCAL_DOMAIN)
 
 .DEFAULT_GOAL := help
 
@@ -33,9 +38,12 @@ MEMQL_HTTP_URL ?= https://bff.$(DOMAIN)
 
 ## Start the Vite dev server (proxies /memql to the bff; the dev-server port is
 ## set by this surface's vite config). The backend cluster must already be up --
-## `make -C ../.. up` brings it up.
+## `make -C ../.. up` brings it up. Sign-in goes to the LOCAL identity: left
+## unset, the app compiles in the cloud one (src/lib/auth/identity.ts).
 dev:
-	MEMQL_HTTP_URL=$(MEMQL_HTTP_URL) $(NPM) run dev
+	MEMQL_HTTP_URL=$(MEMQL_HTTP_URL) \
+	VITE_IDENTITY_BASE_URL=$${VITE_IDENTITY_BASE_URL:-https://identity.$(LOCAL_DOMAIN)} \
+	$(NPM) run dev
 
 ## Alias for `dev` -- the lean starter ships a frontend-only dev server.
 dev-frontend: dev

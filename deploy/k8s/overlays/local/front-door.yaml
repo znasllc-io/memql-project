@@ -1,14 +1,17 @@
-# __PRODUCT__ front door on the local k3d cluster. traefik terminates TLS on
-# 443 with the operator's mkcert wildcard (memql-front-door-tls, seeded
-# engine-side by `make -C ../memql up`) and routes by hostname:
-#   https://bff.__DOMAIN__  -> the product bff's HTTP surface (the /memql/ws
-#                              bridge the SPA consumes).
-#   https://app.__DOMAIN__  -> the in-cluster `web` client surface, with the same
-#                              path-routing as the deployed public entry:
-#                              /memql -> the product bff,
-#                              the auth paths -> identity, / -> __PRODUCT__-web.
+# __PRODUCT__ front door on the local k3d cluster, always at the LOCAL domain
+# memql.__PRODUCT__.localhost (the root Makefile's LOCAL_DOMAIN) and never at
+# the cloud domain. traefik terminates TLS on 443 with the operator's mkcert
+# wildcard for *.memql.__PRODUCT__.localhost (memql-front-door-tls, seeded
+# engine-side by the engine bring-up) and routes by hostname:
+#   https://bff.memql.__PRODUCT__.localhost  -> the product bff's HTTP surface
+#                       (the /memql/ws bridge the SPA consumes).
+#   https://app.memql.__PRODUCT__.localhost  -> the in-cluster `web` client
+#                       surface, with the same path-routing as the deployed
+#                       public entry: /memql -> the product bff,
+#                       the auth paths -> identity, / -> __PRODUCT__-web.
 # A SECOND client surface (clients/README.md) takes its own host rule here (e.g.
-# game.__DOMAIN__ -> __PRODUCT__-game) or its own longer path prefix.
+# game.memql.__PRODUCT__.localhost -> __PRODUCT__-game) or its own longer path
+# prefix.
 # identity is an engine service (owned by the engine Application); an
 # Ingress routes to any Service in the namespace by name.
 apiVersion: networking.k8s.io/v1
@@ -19,10 +22,10 @@ metadata:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
 spec:
   tls:
-    - hosts: ["bff.__DOMAIN__"]
+    - hosts: ["bff.memql.__PRODUCT__.localhost"]
       secretName: memql-front-door-tls
   rules:
-    - host: bff.__DOMAIN__
+    - host: bff.memql.__PRODUCT__.localhost
       http:
         paths:
           - path: /
@@ -47,10 +50,10 @@ metadata:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
 spec:
   tls:
-    - hosts: ["app.__DOMAIN__"]
+    - hosts: ["app.memql.__PRODUCT__.localhost"]
       secretName: memql-front-door-tls
   rules:
-    - host: app.__DOMAIN__
+    - host: app.memql.__PRODUCT__.localhost
       http:
         paths:
           - { path: /memql, pathType: Prefix, backend: { service: { name: bff-__PRODUCT__, port: { number: 8085 } } } }
