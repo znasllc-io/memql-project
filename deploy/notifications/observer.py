@@ -368,7 +368,7 @@ def probe(spec):
                 raise SafeFailure('probe-asset-returned-html')
 
 
-def workload_images(api, namespace, resource):
+def workload_images(api, namespace, resource, allow_idle=False):
     kind, name = resource['kind'], resource['name']
     plural = {'Deployment': 'deployments', 'StatefulSet': 'statefulsets', 'DaemonSet': 'daemonsets'}[kind]
     obj = api.get('/apis/apps/v1/namespaces/' + namespace + '/' + plural + '/' + name)
@@ -401,7 +401,20 @@ def workload_images(api, namespace, resource):
     labels = ','.join(k + '=' + v for k, v in selector['matchLabels'].items())
     pods = api.get('/api/v1/namespaces/' + namespace + '/pods?' + urllib.parse.urlencode({'labelSelector': labels}))['items']
     if desired == 0:
-        if kind == 'DaemonSet' or applied_spec.get('replicas', 1) != 0 or pods or status.get('replicas', 0) != 0:
+        if kind == 'DaemonSet':
+            # An explicitly named, autoscaled background pool can have no
+            # eligible nodes. Require the controller's current generation and
+            # the complete applied placement rules; absence proves no runtime
+            # image, and a serving DaemonSet is never exempted by default.
+            if (not allow_idle or status.get('desiredNumberScheduled') != 0 or
+                    status.get('currentNumberScheduled') != 0 or not intended.get('nodeSelector') or
+                    any(template.get(key) != intended.get(key) for key in
+                        ('nodeSelector', 'affinity', 'tolerations', 'nodeName')) or
+                    any(status.get(key, 0) != 0 for key in
+                        ('currentNumberScheduled', 'numberMisscheduled', 'numberAvailable')) or pods):
+                raise SafeFailure(name + ': idle-daemonset-evidence-mismatch')
+            return [], []
+        if applied_spec.get('replicas', 1) != 0 or pods or status.get('replicas', 0) != 0:
             raise SafeFailure(name + ': scale-zero-evidence-mismatch')
         return [], []  # Deliberately disabled workload; no running image claim.
     pods = [p for p in pods if not p['metadata'].get('deletionTimestamp')]
@@ -449,6 +462,14 @@ def verify_composition(config, api, apps, read_apps):
     repositories = {a['spec']['source'].get('repoURL') for a in apps}
     if len(revisions) != 1 or not all(revisions) or len(repositories) != 1:
         raise SafeFailure('composition-source-mismatch')
+    idle = config.get('idle_daemonsets', [])
+    if (not isinstance(idle, list) or any(not isinstance(item, dict) or
+            set(item) != {'namespace', 'name'} or
+            any(not isinstance(value, str) or not re.fullmatch(r'[a-z0-9][a-z0-9.-]*', value)
+                for value in item.values()) for item in idle)):
+        raise SafeFailure('idle-daemonsets-configuration-invalid')
+    def allow_idle(resource):
+        return resource['kind'] == 'DaemonSet' and {'namespace': resource['namespace'], 'name': resource['name']} in idle
     evidence = {'images': {}, 'runtime': [], 'probes': [], 'services': []}
     for app in apps:
         resources = [r for r in app['status'].get('resources', []) if r.get('kind') in ('Deployment', 'StatefulSet', 'DaemonSet')]
@@ -459,8 +480,9 @@ def verify_composition(config, api, apps, read_apps):
         for resource in resources:
             if resource.get('namespace') not in allowed_namespaces:
                 raise SafeFailure('composition-namespace-mismatch')
-            found, runtime = workload_images(api, resource['namespace'], resource)
-            evidence['services'].append(resource['namespace'] + '/' + resource['kind'] + '/' + resource['name'] + (' (scaled to zero)' if not found else ''))
+            found, runtime = workload_images(api, resource['namespace'], resource, allow_idle(resource))
+            empty = ' (idle pool; no running image)' if resource['kind'] == 'DaemonSet' else ' (scaled to zero)'
+            evidence['services'].append(resource['namespace'] + '/' + resource['kind'] + '/' + resource['name'] + (empty if not found else ''))
             images.extend(found)
             evidence['runtime'].extend(runtime)
         evidence['images'][config['applications'][app['metadata']['name']]] = sorted(set(images))
@@ -485,7 +507,7 @@ def verify_composition(config, api, apps, read_apps):
     for app in apps:
         for resource in app['status'].get('resources', []):
             if resource.get('kind') in ('Deployment', 'StatefulSet', 'DaemonSet'):
-                _, runtime = workload_images(api, resource['namespace'], resource)
+                _, runtime = workload_images(api, resource['namespace'], resource, allow_idle(resource))
                 second_runtime.extend(runtime)
     ordered = lambda rows: sorted(encode(row) for row in rows)
     if ordered(second_runtime) != ordered(evidence['runtime']):

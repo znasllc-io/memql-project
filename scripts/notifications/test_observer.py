@@ -258,7 +258,7 @@ class Verification(unittest.TestCase):
         self.config['additional_workload_namespaces'] = ['build-system']
         self.apps[0]['status']['resources'].append({'kind': 'DaemonSet', 'name': 'profiles', 'namespace': 'build-system'})
         observed = []
-        def read(api, namespace, resource):
+        def read(api, namespace, resource, allow_idle=False):
             observed.append((namespace, resource['name']))
             return ['engine@sha256:' + 'a' * 64], [{'pod': namespace + '/one', 'runtime': 'sha256:' + 'b' * 64}]
         with patch.object(o, 'workload_images', side_effect=read):
@@ -352,6 +352,50 @@ class Verification(unittest.TestCase):
         self.config['functional_probe_file'] = '/does-not-exist/check.json'
         with self.assertRaisesRegex(o.SafeFailure, 'credential-or-contract-missing'):
             self.verify()
+
+    def idle_daemonset(self):
+        for app in self.apps:
+            app['status']['resources'][0]['kind'] = 'DaemonSet'
+        self.deployment['spec'].pop('replicas')
+        self.deployment['spec']['template']['spec']['nodeSelector'] = {'pool': 'builds'}
+        self.deployment['status'] = {'observedGeneration': 1, 'desiredNumberScheduled': 0,
+                                     'currentNumberScheduled': 0, 'numberReady': 0}
+        self.deployment['metadata']['annotations']['kubectl.kubernetes.io/last-applied-configuration'] = json.dumps({'spec': self.deployment['spec']})
+        self.config['idle_daemonsets'] = [{'namespace': 'memql', 'name': 'head'}]
+
+    def test_explicit_idle_daemonset_has_no_running_image_claim(self):
+        self.idle_daemonset()
+        with patch.object(self.api, 'get', side_effect=lambda path: {'items': []} if '/pods?' in path else self.deployment):
+            evidence = self.verify()
+        self.assertEqual(evidence['runtime'], [])
+        self.assertTrue(all('(idle pool; no running image)' in s for s in evidence['services']))
+
+    def test_idle_daemonset_rejects_unlisted_drift_and_inconsistent_controller(self):
+        changes = [lambda: self.config.pop('idle_daemonsets'),
+                   lambda: self.deployment['spec']['template']['spec']['nodeSelector'].update(pool='wrong'),
+                   lambda: self.deployment['status'].update(currentNumberScheduled=1),
+                   lambda: self.deployment['status'].update(numberMisscheduled=1),
+                   lambda: self.deployment['status'].pop('desiredNumberScheduled'),
+                   lambda: self.deployment['status'].update(observedGeneration=0)]
+        for change in changes:
+            with self.subTest(change=change):
+                self.setUp()
+                self.idle_daemonset()
+                change()
+                with patch.object(self.api, 'get', side_effect=lambda path: {'items': []} if '/pods?' in path else self.deployment):
+                    with self.assertRaises(o.SafeFailure):
+                        self.verify()
+
+    def test_idle_daemonset_rejects_remaining_pods(self):
+        self.idle_daemonset()
+        with self.assertRaisesRegex(o.SafeFailure, 'idle-daemonset-evidence-mismatch'):
+            self.verify()
+
+    def test_idle_daemonset_configuration_is_exact(self):
+        for value in ['head', [{'namespace': '*', 'name': 'head'}], [{'namespace': 'memql'}]]:
+            self.config['idle_daemonsets'] = value
+            with self.assertRaisesRegex(o.SafeFailure, 'configuration-invalid'):
+                self.verify()
 
 
 
