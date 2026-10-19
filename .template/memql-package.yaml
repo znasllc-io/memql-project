@@ -10,6 +10,12 @@ pipeline:
   stages:
   - name: checks
     steps:
+    - name: repository-proposals
+      placement: cluster
+      timeout: 5m
+      cpuMilli: 250
+      memoryMiB: 512
+      run: python3 -m unittest discover -s scripts/ci -p repository_proposal_test.py
     - name: product-images
       placement: cluster
       timeout: 5m
