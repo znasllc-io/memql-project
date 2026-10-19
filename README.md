@@ -73,7 +73,7 @@ product boots a full stack with zero engine-repo edits.**
    runtime (DSL contents, k8s/ArgoCD manifest fields, each client surface's
    package + boot defaults, `ONBOARDING.md`, `CLAUDE.md`); clones `../memql` and
    `../memql-cockpit` as siblings; and prunes the template-only artifacts
-   (`template-ci.yml`, `product.env.example`) plus this README (replaced with a
+   (`.template/memql-package.yaml`, `product.env.example`) plus this README (replaced with a
    product stub). Pass `--registry=...` for a real image registry (default:
    empty = local-only), `--engine-ref=...` to pin the engine, `--skip-clones`
    to skip the sibling clones, `--dry-run` to preview with zero mutation.
@@ -207,7 +207,7 @@ git merge template/main --allow-unrelated-histories   # first time only
 
 The first `--allow-unrelated-histories` merge pulls the template's **pre-stamp**
 tree, so it resurrects what `init.sh` pruned/renamed (`dsl/__PRODUCT_ID__/`,
-`template-ci.yml`, `product.env.example`, `deploy/argocd/apps/__PRODUCT__-*.yaml`).
+`.template/memql-package.yaml`, `product.env.example`, `deploy/argocd/apps/__PRODUCT__-*.yaml`).
 Re-prune them and commit after the first sync (runtime is safe meanwhile -- the
 engine skips `_`-prefixed DSL domains). Later syncs are ordinary merges; expect
 modify/delete conflicts on those paths and resolve by keeping them deleted. See
@@ -227,7 +227,7 @@ the engine; product-specific -> the product repo.
 | `clients/` | the product's client surfaces (plural); `clients/web/` is the self-contained starter, `clients/README.md` the convention |
 | `deploy/` | bundle image + kustomize overlays + ArgoCD manifests |
 | `ONBOARDING.md` / `CLAUDE.md` | dev guide + agent guide the stamp personalizes |
-| `.github/workflows/` | `template-ci.yml` (template-only), `ci.yml` (product CI), `gitleaks.yml` |
+| `memql-package.yaml` | Native template checks; `.template/memql-package.yaml` supplies the stamped product recipe |
 
 ### Running two products locally
 

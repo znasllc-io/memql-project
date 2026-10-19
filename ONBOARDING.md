@@ -185,7 +185,7 @@ git merge template/main --allow-unrelated-histories   # first time only
 template's *pre-stamp* tree, which RESURRECTS everything `init.sh` renamed or
 pruned: the template's **placeholder DSL directory** (the template ships `dsl/`
 under its product-token name -- `git status` shows it next to your real
-`dsl/__PRODUCT_ID__/`), `.github/workflows/template-ci.yml`, `product.env.example`,
+`dsl/__PRODUCT_ID__/`), `.template/memql-package.yaml`, `product.env.example`,
 and the template's **placeholder ArgoCD app manifest** under
 `deploy/argocd/apps/` (the `*-cloud.yaml` file under the token name, alongside
 your stamped `__PRODUCT__-cloud.yaml`). Delete the resurrected placeholders
@@ -193,7 +193,7 @@ your stamped `__PRODUCT__-cloud.yaml`). Delete the resurrected placeholders
 
 ```bash
 git status                                     # lists the resurrected pre-stamp artifacts
-git rm .github/workflows/template-ci.yml product.env.example
+git rm .template/memql-package.yaml product.env.example
 git rm -r <the resurrected placeholder DSL dir>          # NOT your dsl/__PRODUCT_ID__/
 git rm <the resurrected placeholder deploy/argocd/apps/*.yaml file>
 git commit -m "chore: re-prune template artifacts after first template sync"

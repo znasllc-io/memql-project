@@ -10,6 +10,27 @@ pipeline:
   stages:
   - name: checks
     steps:
+    - name: repository-proposals
+      placement: cluster
+      timeout: 5m
+      cpuMilli: 250
+      memoryMiB: 512
+      run: python3 -m unittest discover -s scripts/ci -p repository_proposal_test.py
+    - name: product-images
+      placement: cluster
+      timeout: 5m
+      cpuMilli: 250
+      memoryMiB: 512
+      run: |
+        set -eu
+        python3 -m unittest discover -s scripts/ci -p test_product_images.py
+        python3 scripts/ci/product-images.py --manifest memql-package.yaml
+    - name: maintenance-contracts
+      placement: cluster
+      timeout: 5m
+      cpuMilli: 250
+      memoryMiB: 512
+      run: python3 -m unittest discover -s scripts/ci -p test_template_drift.py -v
     - name: shellcheck
       placement: cluster
       timeout: 45m
@@ -308,3 +329,63 @@ pipeline:
       memoryMiB: 4096
       artifacts:
       - .memql-security/gitleaks
+
+  - name: maintenance
+    on: [schedule, manual]
+    schedule: weekly
+    runAfterFailure: true
+    steps:
+    - name: template-drift
+      placement: cluster
+      timeout: 5m
+      cpuMilli: 250
+      memoryMiB: 512
+      artifacts: [.memql-maintenance]
+      run: python3 scripts/ci/template-drift.py
+  # BEGIN NATIVE PRODUCT IMAGES
+  - name: images
+    'on':
+    - release
+    steps:
+    - name: dsl-bundle
+      placement: cluster
+      caches: []
+      cpuMilli: 2000
+      memoryMiB: 4096
+      timeout: 45m
+      imageBuild:
+        context: .
+        dockerfile: deploy/Dockerfile.bundle
+    - name: web
+      placement: cluster
+      caches: []
+      cpuMilli: 2000
+      memoryMiB: 4096
+      timeout: 45m
+      imageBuild:
+        context: clients/web
+        dockerfile: clients/web/Dockerfile
+  # END NATIVE PRODUCT IMAGES
+
+  - name: engine-proposal
+    on: [schedule, manual]
+    schedule: weekly
+    steps:
+    - name: prepare
+      placement: cluster
+      githubReadToken: true
+      timeout: 5m
+      cpuMilli: 250
+      memoryMiB: 512
+      artifacts: [.reports/engine-proposal.json]
+      run: python3 scripts/ci/repository-proposal.py engine-watch --output=.reports/engine-proposal.json
+  - name: engine-proposal-write
+    on: [schedule, manual]
+    schedule: weekly
+    steps:
+    - name: propose
+      timeout: 5m
+      repositoryChange:
+        rule: engine-watch-__PRODUCT__
+        step: engine-proposal.prepare
+        path: .reports/engine-proposal.json
