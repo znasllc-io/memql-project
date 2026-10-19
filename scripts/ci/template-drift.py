@@ -8,9 +8,8 @@ import subprocess
 import tempfile
 
 
-PATHS = ('.github/workflows', 'scripts', 'Makefile', 'CLAUDE.md', 'ONBOARDING.md', '.gitignore')
-TEMPLATE_ONLY = {'.github/workflows/template-ci.yml'}
-STAMPED = {'CLAUDE.md', 'ONBOARDING.md'}
+PATHS = ('memql-package.yaml', 'scripts', 'Makefile', 'CLAUDE.md', 'ONBOARDING.md', '.gitignore')
+STAMPED = {'CLAUDE.md', 'ONBOARDING.md', 'memql-package.yaml'}
 
 
 def git(root, *args):
@@ -21,7 +20,7 @@ def git(root, *args):
 
 def inventory(root):
     # Tracked paths only: test caches and local scratch are not harness drift.
-    return {name.decode() for name in git(root, 'ls-files', '-z', '--', *PATHS).split(b'\0') if name} - TEMPLATE_ONLY
+    return {name.decode() for name in git(root, 'ls-files', '-z', '--', *PATHS).split(b'\0') if name}
 
 
 def digest(root, name):

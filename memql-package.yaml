@@ -249,7 +249,7 @@ pipeline:
         test "$(ls deploy/argocd/apps)" = "$PRODUCT-cloud.yaml"
         test -f product.env && grep -qx "PRODUCT=$PRODUCT" product.env
         test ! -e product.env.example
-        test ! -e .github/workflows/template-ci.yml   # pruned in the stamped copy
+        test ! -e .template/memql-package.yaml   # pruned in the stamped copy
         )
 
         # Makefile parse smoke (stamped) (#34)
@@ -454,7 +454,7 @@ pipeline:
         test "$(ls deploy/argocd/apps)" = "$PRODUCT-cloud.yaml"
         test -f product.env && grep -qx "PRODUCT=$PRODUCT" product.env
         test ! -e product.env.example
-        test ! -e .github/workflows/template-ci.yml   # pruned in the stamped copy
+        test ! -e .template/memql-package.yaml   # pruned in the stamped copy
         )
 
         # Makefile parse smoke (stamped) (#34)

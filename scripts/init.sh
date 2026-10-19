@@ -18,7 +18,7 @@ set -euo pipefail
 #      so a later `git merge template/main` never conflicts on plumbing;
 #   4. clones ../memql (at --engine-ref) and ../memql-cockpit (at --cockpit-ref)
 #      as SIBLINGS in the PARENT directory (the workspace);
-#   5. prunes template-only artifacts (template-ci.yml, product.env.example) and
+#   5. prunes template-only artifacts (.template/memql-package.yaml, product.env.example) and
 #      replaces the template README with a product README stub.
 #
 # CAPABILITY SCRIPT (the engine's docs/internal/design/capability-script-contract.md):
@@ -184,12 +184,12 @@ function reconcile_with_existing_env() {
 # the run writes a product.env + envelope claiming the new name over a tree that
 # still carries the old one -- and reports ok:true (the B1-adjacent hole). Stamp
 # evidence = init.sh's own irreversible first-stamp effects: the pre-stamp DSL dir
-# `dsl/__PRODUCT_ID__/` was renamed away, or `template-ci.yml` was pruned. A pristine
+# `dsl/__PRODUCT_ID__/` was renamed away, or `.template/memql-package.yaml` was pruned. A pristine
 # template checkout has BOTH, so a legitimate first stamp is never blocked.
 function detect_orphaned_stamp() {
     [[ -f "$ROOT/product.env" ]] && return 0     # present -> reconcile_with_existing_env owns it
-    if [[ ! -d "$ROOT/dsl/__PRODUCT_ID__" ]] || [[ ! -e "$ROOT/.github/workflows/template-ci.yml" ]]; then
-        cap_fail 3 "product.env is missing but this tree was already stamped (dsl/__PRODUCT_ID__/ was renamed away, or template-ci.yml was pruned) -- refusing to stamp over it with a new identity. Restore product.env (e.g. 'git checkout -- product.env' or from history), or start from a fresh template checkout."
+    if [[ ! -d "$ROOT/dsl/__PRODUCT_ID__" ]] || [[ ! -e "$ROOT/.template/memql-package.yaml" ]]; then
+        cap_fail 3 "product.env is missing but this tree was already stamped (dsl/__PRODUCT_ID__/ was renamed away, or .template/memql-package.yaml was pruned) -- refusing to stamp over it with a new identity. Restore product.env (e.g. 'git checkout -- product.env' or from history), or start from a fresh template checkout."
     fi
     return 0
 }
@@ -435,7 +435,7 @@ function replace_readme() {
         printf 'The first `--allow-unrelated-histories` merge pulls the template'"'"'s\n'
         printf 'PRE-STAMP tree, so it resurrects what init.sh pruned/renamed: the\n'
         printf 'template placeholder DSL directory (next to your `dsl/%s/`),\n' "$PRODUCT"
-        printf '`template-ci.yml`, `product.env.example`, and the placeholder ArgoCD\n'
+        printf '`.template/memql-package.yaml`, `product.env.example`, and the placeholder ArgoCD\n'
         printf 'app files under `deploy/argocd/apps/`. Re-prune and commit them after\n'
         printf 'the first sync (runtime is safe meanwhile -- the engine skips\n'
         printf '`_`-prefixed DSL domains); later syncs are ordinary merges with\n'
@@ -455,14 +455,13 @@ function replace_readme() {
 
 # prune_template_artifacts -- remove files only the template needs.
 function prune_template_artifacts() {
-    local f
-    for f in ".github/workflows/template-ci.yml" "product.env.example"; do
-        if [[ -e "$ROOT/$f" ]]; then
-            rm -f "$ROOT/$f"
-            cap_step "pruned $f"
-            cap_changed
-        fi
-    done
+    local f="product.env.example"
+    if [[ -e "$ROOT/$f" ]]; then
+        rm -f "$ROOT/$f"
+        cap_step "pruned $f"
+        cap_changed
+    fi
+    return 0
 }
 
 # Materialize the template-owned product recipe before ordinary token stamping.
@@ -497,7 +496,7 @@ function print_dry_run_plan() {
     fi
     cap_info "would rename: dsl/__PRODUCT_ID__/ -> dsl/$PRODUCT_ID/, deploy/argocd/apps/__PRODUCT__-*.yaml"
     cap_info "would stamp:  dsl/, deploy/, clients/ (every surface: src+manifests+docs), ONBOARDING.md, CLAUDE.md, memql-package.yaml"
-    cap_info "would prune:  .github/workflows/template-ci.yml, product.env.example; replace README.md with a product stub"
+    cap_info "would prune:  .template/memql-package.yaml, product.env.example; replace README.md with a product stub"
     if [[ -n "$SKIP_CLONES" ]]; then
         cap_info "would clone:  (skipped -- --skip-clones)"
     else

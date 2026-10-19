@@ -29,12 +29,12 @@ class DriftTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root, template = Path(directory) / 'root', Path(directory) / 'template'
             checkout(root, {'Makefile': 'same', 'CLAUDE.md': 'product', 'scripts/common.sh': 'changed',
-                            'scripts/extra.py': 'new', 'clients/app.txt': 'product'})
+                            'scripts/extra.py': 'new', 'clients/app.txt': 'product', 'memql-package.yaml': 'product recipe'})
             checkout(template, {'Makefile': 'same', 'CLAUDE.md': 'template', 'scripts/common.sh': 'original',
-                                'scripts/missing.py': 'missing', '.github/workflows/template-ci.yml': 'template only'})
+                                'scripts/missing.py': 'missing', '.template/memql-package.yaml': 'template only', 'memql-package.yaml': 'template checks'})
             (root / 'scripts/scratch.txt').write_text('not tracked')
             receipt = drift.compare(root, template)
-            self.assertEqual(receipt['counts'], {'same': 1, 'stamped': 1, 'differs': 1, 'missing': 1, 'extra': 1})
+            self.assertEqual(receipt['counts'], {'same': 1, 'stamped': 2, 'differs': 1, 'missing': 1, 'extra': 1})
             self.assertEqual(len(receipt['sourceCommit']), 40)
             self.assertEqual(len(receipt['templateCommit']), 40)
             self.assertNotEqual(receipt['sourceCommit'], receipt['templateCommit'])

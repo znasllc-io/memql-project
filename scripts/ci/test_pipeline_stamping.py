@@ -43,6 +43,19 @@ class PipelineStamping(unittest.TestCase):
         self.assertEqual(refused.returncode, 3)
         self.assertEqual(manifest.read_bytes(), before)
 
+    def test_lost_identity_is_refused_after_native_recipe_is_consumed(self):
+        first = self.stamp()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        (self.root / "product.env").unlink()
+        # Even a template sync that restores its DSL directory cannot make an
+        # already-consumed native recipe look like an unstamped product.
+        (self.root / "dsl/__PRODUCT_ID__").mkdir(exist_ok=True)
+        before = (self.root / "memql-package.yaml").read_bytes()
+        result = self.stamp(product="different")
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertFalse((self.root / "product.env").exists())
+        self.assertEqual((self.root / "memql-package.yaml").read_bytes(), before)
+
     def test_dry_run_keeps_both_recipes_unchanged(self):
         paths = [self.root / "memql-package.yaml", self.root / ".template/memql-package.yaml"]
         before = [p.read_bytes() for p in paths]

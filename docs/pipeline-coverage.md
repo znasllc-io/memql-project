@@ -153,4 +153,18 @@ The operator must configure the recipe's named rule in
 current default branch before creating a draft PR. It does not merge or deploy;
 reviewers must resolve and update image digests and qualify the resulting PR.
 An existing proposal branch is preserved, including a deliberately closed PR.
-Keep the old workflow until the installed native write has a retained receipt.
+Merging workflow retirement requires a retained receipt from the installed
+native writer.
+
+## Native template identity and harness comparison
+
+The unstamped `.template/memql-package.yaml` is the setup marker. The first
+stamp consumes it into the root product manifest. A later run preserves the
+owner's recipe; a missing `product.env` after consumption refuses restamping,
+even if a template sync restores the placeholder DSL directory. No setup check
+depends on an Actions workflow file.
+
+The weekly comparison inventories tracked scripts, setup documentation and the
+native manifest. Product manifests are reported as stamped differences, since
+applications and execution choices legitimately differ. Untracked caches and
+the consumed template recipe cannot appear as product harness drift.
