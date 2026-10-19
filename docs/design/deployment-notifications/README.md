@@ -1,5 +1,33 @@
 # Automatic deployment notifications
 
+## Native notification delivery
+
+After the installation's public verification stage, declare a native notification
+stage with the same deployment events, the earlier stage in `needs`, and
+`runAfterFailure: true`. Its `channel` names an owner-managed channel explicitly
+allowed on that pipeline. Keep deployment notices off pull requests, merge
+candidates and scheduled audits unless the operator separately chooses them.
+
+A Discord channel references a sealed global secret containing its dedicated
+webhook. The driver hands the message to the existing outbound worker; commands
+receive no webhook, and the notification step passes only after a durable sent
+receipt. The message includes Version, MemQL OS and the actual run page as
+Deployment details. Version identifies the release tag or source commit of the
+run; retained rollout evidence identifies the approved engine image and version.
+The run page replaces the legacy placeholder below. Mentions remain disabled.
+
+For a self-hosting engine update, pause automatic intake after the pin PR passes,
+drain whole runs including fleet work, merge and reconcile the pin, then restore
+intake after public health checks. The resulting main push verifies the deployed
+release without replacing its own active controller.
+
+An installation migrating an existing observer first qualifies an authorized
+native delivery. It then sets observer replicas to zero in Git, retains the
+state volume through one complete release/verification/notification pass, and
+removes the observer after acceptance. Keep a Git rollback to one replica and
+revoke the native channel grant before using that fallback. Avoid competing
+automatic senders; do not manufacture production failures to test delivery.
+
 ## Native public rollout verification
 
 `scripts/notifications/verify_rollout.py` binds the engine's existing
@@ -197,9 +225,9 @@ short overview:
   Argo sync revision (short SHA when every app agrees; `unknown` on mismatch).
 - **MemQL OS** — markdown link from `config.links["MemQL OS"]` when present.
   Omitted entirely when that link is not configured; no URL is invented.
-- **Deployment details** — plain-text placeholder `Coming soon in MemQL OS.` until
-  a future MemQL OS automation provides a richer deployment report URL. No fake
-  report link is created.
+- **Deployment details** — the legacy observer retains the plain-text placeholder
+  `Coming soon in MemQL OS.` Native delivery uses the actual pipeline run page
+  described above; the observer does not invent a report URL.
 
 Image digests, runtime evidence and full source revisions remain in persistent
 observer state instead of filling the Discord message. The delivery and verification
