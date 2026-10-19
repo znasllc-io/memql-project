@@ -633,3 +633,26 @@ pipeline:
       memoryMiB: 512
       artifacts: [.memql-maintenance]
       run: python3 scripts/ci/template-drift.py
+
+  - name: engine-proposal
+    on: [schedule, manual]
+    schedule: weekly
+    steps:
+    - name: prepare
+      placement: cluster
+      githubReadToken: true
+      timeout: 5m
+      cpuMilli: 250
+      memoryMiB: 512
+      artifacts: [.reports/engine-proposal.json]
+      run: python3 scripts/ci/repository-proposal.py engine-watch --output=.reports/engine-proposal.json
+  - name: engine-proposal-write
+    on: [schedule, manual]
+    schedule: weekly
+    steps:
+    - name: propose
+      timeout: 5m
+      repositoryChange:
+        rule: engine-watch-memql-project
+        step: engine-proposal.prepare
+        path: .reports/engine-proposal.json

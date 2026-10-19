@@ -41,7 +41,7 @@ a GitHub App, grant repository access or authorize publishing.
 | `deployment-observer-tests.yml` | Observer Python tests and render | Installed check delivery. |
 | `gitleaks.yml` | v8.30.1 introduced-commit scan on PR/push/merge candidates; weekly and explicit manual full-history scans; redacted coverage receipts retained | Weekly trigger and installed full-history execution. |
 | `publish-images.yml` | Declared release image builds for the bundle and every client surface; checked inventory prevents omissions | Installed builds, approved registry destinations, verified native publication receipts and immutable lockfile. |
-| `engine-version-watch.yml` | No equivalent declared | Weekly/manual released-engine lookup and authorized bump PR creation. |
+| `engine-version-watch.yml` | Weekly/manual retained proposal and bounded native draft-PR writer | Weekly/manual released-engine lookup and authorized bump PR creation. |
 | `template-drift.yml` | Weekly/manual native comparison with the selected upstream template revision; retained JSON report | Installed receipt before removing the old workflow. |
 
 The common product recipe is shipped as data, not constructed in Go. The
@@ -137,3 +137,20 @@ to satisfy a private dependency; configure the appropriate bounded reader.
 Retire the legacy publisher after this complete native path has a retained
 qualification receipt. Its remaining file does not authorize using Actions as
 a fallback.
+
+## Engine release proposals
+
+The weekly `engine-proposal` stages require engine 0.29.33's native
+`repositoryChange` contract. Do not activate this recipe on an older engine.
+The producer reads published stable releases and changes only the literal
+`ENGINE_REF` assignment. A repository-scoped reader token stays on that
+repository's GitHub API paths. No shell sources `product.env`.
+
+The operator must configure the recipe's named rule in
+`MEMQL_PIPELINES_REPOSITORY_CHANGE_RULES` with this exact repository, mode
+`propose`, branch prefix `engine-bump/`, and the single allowed path
+`product.env`. The driver independently verifies the retained proposal and
+current default branch before creating a draft PR. It does not merge or deploy;
+reviewers must resolve and update image digests and qualify the resulting PR.
+An existing proposal branch is preserved, including a deliberately closed PR.
+Keep the old workflow until the installed native write has a retained receipt.
