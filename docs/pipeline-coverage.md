@@ -140,7 +140,7 @@ a fallback.
 
 ## Engine release proposals
 
-The weekly `engine-proposal` stages require engine 0.29.33's native
+The weekly `engine-proposal` stages require engine 0.30.0's native
 `repositoryChange` contract. Do not activate this recipe on an older engine.
 The producer reads published stable releases and changes only the literal
 `ENGINE_REF` assignment. A repository-scoped reader token stays on that
