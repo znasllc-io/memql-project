@@ -1,5 +1,47 @@
 # Automatic deployment notifications
 
+## Native public rollout verification
+
+`scripts/notifications/verify_rollout.py` binds the engine's existing
+`memql-verify` public checks to an approved immutable edge image. A native
+pipeline step supplies the image digest from its deployment manifest, the
+expected engine version, public domain and OS origin. The wrapper downloads
+the public image anonymously with `crane`, reads its OS bundle manifest without
+extracting the filesystem, and requires the served manifest to match it before
+and after the public checks. It does not read Kubernetes or registry credentials.
+
+Build `memql-verify` from the engine revision pinned by the installation and
+install `crane` at `github.com/google/go-containerregistry/cmd/crane@v0.22.1`
+inside the step's workspace. For example, after those tools are available:
+
+```bash
+python3 scripts/notifications/verify_rollout.py \
+  --edge-image="$APPROVED_EDGE_IMAGE" \
+  --domain="$DOMAIN" --version="$ENGINE_REF" \
+  --os-origin="$OS_ORIGIN" --docs="$DOCS_PAGE" \
+  --crane="$PWD/.memql-ci/bin/crane" \
+  --verifier="$PWD/.memql-ci/bin/memql-verify" \
+  --evidence=.memql-ci/rollout/verification.json
+```
+
+Declare `.memql-ci/rollout` as a step artifact so the Library retains the typed
+receipt on success or failure. `DOCS_PAGE` is an exact HTTPS page address; an
+empty value explicitly skips documentation verification. The other inputs are
+required installation values. Only exit zero means verified. Redirects, malformed
+or oversized manifests, changed bundles, missing child evidence and failed
+public probes all refuse success. Downloads and scratch files are removed when
+the step finishes.
+
+The public checks sample API, identity and OS health six times and validate the
+OS HTML and its referenced assets. Sampling can reach multiple replicas but does
+not establish an exhaustive pod census. This step establishes the listed public
+release checks; it does not claim Argo reconciliation, authenticated interactions,
+notification delivery or zero dropped streams. Keep the existing observer until
+the installation has qualified native verification and channel delivery, then
+disable its Deployment while preserving its PVC and delivery receipts.
+
+## Existing deployment observer
+
 Implemented preparation; inactive until an instance supplies its destination and
 public probe configuration, validates live operation and scales to one.
 The base Deployment has zero replicas and is not included in another overlay.
