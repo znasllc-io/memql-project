@@ -40,9 +40,9 @@ a GitHub App, grant repository access or authorize publishing.
 | `template-ci.yml` | Make parse; complete `demo` and `demo-app` stamping assertions, token isolation, layout, DSL lint/migration/coexistence, renders/CORS, clients, repeat stamp and refused identity change; manifest replacement regression | Execute both matrix recipes on the pinned container. The separate stamped-DSL job's lint assertion is covered inside both matrix recipes. |
 | `deployment-observer-tests.yml` | Observer Python tests and render | Installed check delivery. |
 | `gitleaks.yml` | v8.30.1 introduced-commit scan on PR/push/merge candidates; weekly and explicit manual full-history scans; redacted coverage receipts retained | Weekly trigger and installed full-history execution. |
-| `publish-images.yml` | No publication equivalent declared | Manual registry/tag/build arguments, authorized image builds/push and coherent immutable release lockfile. |
+| `publish-images.yml` | Declared release image builds for the bundle and every client surface; checked inventory prevents omissions | Installed builds, approved registry destinations, verified native publication receipts and immutable lockfile. |
 | `engine-version-watch.yml` | No equivalent declared | Weekly/manual released-engine lookup and authorized bump PR creation. |
-| `template-drift.yml` | No equivalent declared | Weekly/manual comparison with the selected upstream template revision. |
+| `template-drift.yml` | Weekly/manual native comparison with the selected upstream template revision; retained JSON report | Installed receipt before removing the old workflow. |
 
 The common product recipe is shipped as data, not constructed in Go. The
 stamper only copies that declared recipe before `product.env` exists; this is mechanical
@@ -100,3 +100,40 @@ still requires the normal complete-history path. Failure to fetch that history
 remains a failed scan; this optimization does not supply private-repository
 credentials or qualify private full-history execution. See Git's
 [shallow-repository contract](https://git-scm.com/docs/shallow).
+
+## Product image releases
+
+`VERSION` identifies the product's image set independently of `ENGINE_REF`.
+Change it in the release PR, merge the checked source, and create the matching
+immutable `vX.Y.Z` tag. Start its release in MemQL Pipelines. The declared
+`images` stage builds `deploy/Dockerfile.bundle` and each `clients/*/Dockerfile`
+on the bounded cloud pool for `linux/amd64`. Builders retain an OCI archive and
+metadata in the Library; they have no registry publisher credential.
+
+After adding or removing a client surface, run
+`python3 scripts/ci/product-images.py --write`, review the marked stage, and
+commit it with the surface change. Existing public build arguments remain in
+that declaration. The required inventory check fails until every component is
+represented and refuses a release tag that disagrees with `VERSION`. Template
+checks validate `.template/memql-package.yaml`; stamped products validate their
+root manifest.
+
+Configure release-candidate sources to read the exact commit's `VERSION` and
+select every `images.<component>` archive plus its metadata. Registry names,
+credentials and immutable destination tags are operator-approved configuration.
+Publish the approved candidate, require verified read-back receipts for every
+component, then pass those registry digests to
+`scripts/release/assemble-lockfile.sh`. Pin and merge that coherent lockfile
+through the existing GitOps deployment path. A build receipt alone is not a
+publication or deployment receipt.
+
+A Dockerfile may opt into `githubReadToken: true` to mount the fixed
+`github_read_token` BuildKit secret for **its own repository's contents**.
+This requires the engine runtime shipped by memql#6200. It does not authorize
+private npm packages or another repository. The starter's dependencies are
+public and request no repository token. Do not substitute a writer credential
+to satisfy a private dependency; configure the appropriate bounded reader.
+
+Retire the legacy publisher after this complete native path has a retained
+qualification receipt. Its remaining file does not authorize using Actions as
+a fallback.

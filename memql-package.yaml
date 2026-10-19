@@ -9,6 +9,15 @@ pipeline:
   stages:
   - name: checks
     steps:
+    - name: product-images
+      placement: cluster
+      timeout: 5m
+      cpuMilli: 250
+      memoryMiB: 512
+      run: |
+        set -eu
+        python3 -m unittest discover -s scripts/ci -p test_product_images.py
+        python3 scripts/ci/product-images.py --manifest .template/memql-package.yaml
     - name: maintenance-contracts
       placement: cluster
       timeout: 5m

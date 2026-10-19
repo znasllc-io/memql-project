@@ -10,6 +10,15 @@ pipeline:
   stages:
   - name: checks
     steps:
+    - name: product-images
+      placement: cluster
+      timeout: 5m
+      cpuMilli: 250
+      memoryMiB: 512
+      run: |
+        set -eu
+        python3 -m unittest discover -s scripts/ci -p test_product_images.py
+        python3 scripts/ci/product-images.py --manifest memql-package.yaml
     - name: maintenance-contracts
       placement: cluster
       timeout: 5m
@@ -327,3 +336,27 @@ pipeline:
       memoryMiB: 512
       artifacts: [.memql-maintenance]
       run: python3 scripts/ci/template-drift.py
+  # BEGIN NATIVE PRODUCT IMAGES
+  - name: images
+    'on':
+    - release
+    steps:
+    - name: dsl-bundle
+      placement: cluster
+      caches: []
+      cpuMilli: 2000
+      memoryMiB: 4096
+      timeout: 45m
+      imageBuild:
+        context: .
+        dockerfile: deploy/Dockerfile.bundle
+    - name: web
+      placement: cluster
+      caches: []
+      cpuMilli: 2000
+      memoryMiB: 4096
+      timeout: 45m
+      imageBuild:
+        context: clients/web
+        dockerfile: clients/web/Dockerfile
+  # END NATIVE PRODUCT IMAGES
