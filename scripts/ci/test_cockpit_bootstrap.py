@@ -46,6 +46,10 @@ if args[:1] == ['clone']:
     if not os.environ.get('BOOTSTRAP_NO_COCKPIT'):
         (dest / 'cockpit').mkdir()
         (dest / 'cockpit/go.mod').write_text('module example.invalid/cockpit\\n')
+    if os.environ.get('BOOTSTRAP_RACE_DEST'):
+        competing = dest.parent.parent / 'memql'
+        (competing / '.git').mkdir(parents=True)
+        (competing / 'keep').write_text('competing work\\n')
     sys.exit(0)
 if args[:1] == ['-C'] and args[2:] == ['checkout', 'c' * 40]:
     sys.exit(0)
@@ -138,6 +142,15 @@ sys.exit(1)
         self.run_init()
         self.assertEqual((dest / ".git").read_text(), "gitdir: /unchanged/worktree\n")
         self.assertEqual(self.calls(), [])
+
+    def test_competing_destination_is_preserved_without_nesting_checkout(self):
+        self.env["BOOTSTRAP_RACE_DEST"] = "1"
+        _, envelope = self.run_init(expected=3)
+        self.assert_unstamped()
+        dest = self.workspace / "memql"
+        self.assertEqual(sorted(p.name for p in dest.iterdir()), [".git", "keep"])
+        self.assertEqual((dest / "keep").read_text(), "competing work\n")
+        self.assertFalse(envelope["changed"])
 
     def test_skip_clones_retains_historical_pin_without_acquiring_source(self):
         self.run_init("--skip-clones", "--engine-ref=v0.14.0")

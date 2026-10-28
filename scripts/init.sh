@@ -392,12 +392,26 @@ function clone_engine() {
         rm -rf "$staging"
         cap_fail 3 "engine ref '$RESOLVED_ENGINE_REF' has no cockpit/ module; keep the historical pin with --skip-clones, or select a monorepo revision containing Cockpit explicitly"
     fi
-    if ! mv "$staging/checkout" "$dest"; then
+    # mkdir reserves the destination without clobbering a checkout that appeared
+    # while the clone ran. Plain mv could instead nest checkout/ inside it.
+    if ! mkdir "$dest"; then
         rm -rf "$staging"
-        cap_fail 5 "could not install the engine checkout at $dest"
+        cap_fail 3 "$dest appeared while cloning; leaving it unchanged"
     fi
-    rmdir "$staging"
     cap_changed
+    # Publish .git last so another init refuses a still-incomplete checkout.
+    if ! (
+        shopt -s dotglob
+        for entry in "$staging/checkout/"*; do
+            [[ "$entry" == "$staging/checkout/.git" ]] && continue
+            mv "$entry" "$dest/" || exit 1
+        done
+        mv "$staging/checkout/.git" "$dest/.git"
+    ); then
+        rm -rf "$staging"
+        cap_fail 5 "partial engine checkout left at $dest; product files are unchanged"
+    fi
+    rmdir "$staging/checkout" "$staging"
 }
 
 # replace_readme -- swap the template README (a guide to the template) for a
