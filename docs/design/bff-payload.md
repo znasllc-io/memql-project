@@ -91,7 +91,7 @@ product bff boots exactly like the neutral engine bff, plus the product pack.
 │   └── import_smoke_test.go       compiles the blank-import surface; init() must not panic
 ├── dsl/<product>/                 UNCHANGED -- the .memql pack stays runtime-bundled
 ├── deploy/                        overlay bff image re-pinned to <product>-bff (section 4)
-└── go.work                        generated: use ./bff + ../memql (+ ../memql-cockpit); gitignored
+└── go.work                        generated: use ./bff + ../memql (+ ../memql/cockpit); gitignored
 ```
 
 ### 2.1 `bff/main.go` -- wrap the engine, add the pack
@@ -241,7 +241,7 @@ go 1.26.x
 use (
 	./bff
 	../memql
-	../memql-cockpit   // if present
+	../memql/cockpit   // if present
 )
 ```
 

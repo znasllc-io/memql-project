@@ -8,8 +8,8 @@ A product is a **DSL bundle plus one or more client surfaces** -- **no product
 Go and no per-product node images** in the common case (platform consolidation,
 [memql#2472](https://github.com/znasllc-io/memql/issues/2472)). You **Use this
 template**, run `scripts/init.sh` once to stamp it in place, and you have a
-product repo. The engine and cockpit are cloned as **siblings in the parent
-directory** (the workspace); the composition at deploy time is **two ArgoCD
+product repo. The engine monorepo is cloned as a **sibling in the parent
+directory** (the workspace), with Cockpit under `memql/cockpit`; the composition at deploy time is **two ArgoCD
 Applications** (engine + product), never a cross-repo kustomize base.
 
 **`clients/` is plural on purpose.** memQL is a platform: one operator serving
@@ -42,8 +42,8 @@ document is the design to implement, not a feature to invoke.
 │   ├── deploy/                 DSL-bundle image + kustomize overlays + ArgoCD manifests
 │   ├── product.env             product identity every operational file reads
 │   └── Makefile                local stack lifecycle (make up|dev|status|down)
-├── memql/                      the shared engine (cloned; never edited per-product)
-└── memql-cockpit/              terminal IDE / ops console (cloned)
+└── memql/                      the shared engine (cloned; never edited per-product)
+    └── cockpit/         machine-side worker and cluster CLI
 ```
 
 Core DSL ships inside the pinned engine, not as editable files in this
@@ -71,12 +71,11 @@ product boots a full stack with zero engine-repo edits.**
    This writes `product.env`; renames `dsl/__PRODUCT_ID__/` -> `dsl/acme/`;
    substitutes the tokens below only where a tool cannot read `product.env` at
    runtime (DSL contents, k8s/ArgoCD manifest fields, each client surface's
-   package + boot defaults, `ONBOARDING.md`, `CLAUDE.md`); clones `../memql` and
-   `../memql-cockpit` as siblings; and prunes the template-only artifacts
+   package + boot defaults, `ONBOARDING.md`, `CLAUDE.md`); clones the sibling `../memql` monorepo (including `cockpit/`); and prunes the template-only artifacts
    (`.template/memql-package.yaml`, `product.env.example`) plus this README (replaced with a
    product stub). Pass `--registry=...` for a real image registry (default:
    empty = local-only), `--engine-ref=...` to pin the engine, `--skip-clones`
-   to skip the sibling clones, `--dry-run` to preview with zero mutation.
+   to skip cloning and validating the engine checkout, `--dry-run` to preview with zero mutation.
 
    `--domain` is the **cloud (production) domain**. It is stamped into the
    cloud overlay's public entry and recorded as `DOMAIN` in `product.env`, and

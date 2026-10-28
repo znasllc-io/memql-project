@@ -54,8 +54,8 @@ def check(root):
             raise ValueError(f"{name} --print-spec: missing non-empty capability name")
         if not isinstance(spec.get("params"), list):
             raise ValueError(f"{name} --print-spec: params must be an array")
-        if name == Path("scripts/init.sh") and (spec["capability"] != "product.init" or len(spec["params"]) < 8):
-            raise ValueError("scripts/init.sh must declare product.init and its eight base parameters")
+        if name == Path("scripts/init.sh") and (spec["capability"] != "product.init" or len(spec["params"]) < 7):
+            raise ValueError("scripts/init.sh must declare product.init and its seven base parameters")
         metadata(root, path, "--help")
         print(f"PASS {name}")
     return len(scripts)

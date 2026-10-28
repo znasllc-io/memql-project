@@ -67,6 +67,7 @@ pipeline:
         # capability metadata discovery and failure controls
         (
         python3 -m unittest discover -s scripts/ci -p 'test_capability_conformance.py'
+        python3 -m unittest discover -s scripts/ci -p 'test_cockpit_bootstrap.py'
         )
 
         # every capability emits one spec and supports help
