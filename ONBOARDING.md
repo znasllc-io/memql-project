@@ -9,20 +9,27 @@ a DSL bundle plus one or more client surfaces, running on the product-agnostic
 ## The workspace
 
 Everything lives under a **parent directory** (the workspace). `scripts/init.sh`
-clones the engine + cockpit as siblings of this repo:
+clones the engine monorepo as a sibling of this repo. Cockpit is its `cockpit/` module:
 
 ```
 <workspace>/
 ├── __PRODUCT__/          THIS repo -- the whole product (dsl/ + clients/ + deploy/)
-├── memql/                the shared engine (Go + MemQL DSL); product-agnostic, read-only for product work
-└── memql-cockpit/        terminal-native IDE + ops console for clusters
+└── memql/                the shared engine (Go + MemQL DSL); product-agnostic, read-only for product work
+    └── cockpit/         machine-side worker and cluster CLI
 ```
 
 | Repo | Remote | Role |
 |---|---|---|
 | `__PRODUCT__` | `__PRODUCT_ORG__/__PRODUCT__` | This product: DSL (`dsl/__PRODUCT_ID__/`), client surfaces (`clients/<name>/`), deploy estate (`deploy/`). |
 | `memql` | `znasllc-io/memql` | The engine: memory graph DB, AI, cluster nodes, the SDK generator + runtime core. Never edit it for product work. |
-| `memql-cockpit` | `znasllc-io/memql-cockpit` | Terminal IDE / ops console; also the worker runtime. |
+| `memql/cockpit` | `znasllc-io/memql` (`cockpit/`) | Machine-side worker and cluster CLI; shares the source checkout and ref. |
+
+The engine ref also selects the Cockpit source; `--cockpit-ref` is no longer
+accepted. Init validates that `cockpit/go.mod` exists before stamping product
+files. Existing checkouts are left unchanged. For an older engine pin that
+predates the monorepo, use `--skip-clones` to retain that pin without acquiring
+Cockpit source, or explicitly select a compatible engine ref. Init never removes
+a pre-existing `memql-cockpit/` sibling.
 
 ## How the product composes with the engine
 

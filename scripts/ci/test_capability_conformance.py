@@ -17,7 +17,7 @@ class ConformanceTest(unittest.TestCase):
         self.root = Path(self.temp.name)
         (self.root / "scripts/lib").mkdir(parents=True)
         (self.root / "scripts/lib/capability.sh").write_text("# fixture runtime\n")
-        self.script("init.sh", {"capability": "product.init", "params": [{}] * 8})
+        self.script("init.sh", {"capability": "product.init", "params": [{}] * 7})
 
     def script(self, name, spec, suffix="", help_exit=0):
         path = self.root / "scripts" / name
@@ -71,7 +71,7 @@ class ConformanceTest(unittest.TestCase):
         self.assertEqual(self.run_check(), 1)
 
     def test_named_init_contract_still_applies(self):
-        self.script("init.sh", {"capability": "wrong", "params": [{}] * 8})
+        self.script("init.sh", {"capability": "wrong", "params": [{}] * 7})
         with self.assertRaisesRegex(ValueError, "product.init"):
             self.run_check()
 

@@ -16,8 +16,8 @@ set -euo pipefail
 #      inject, each client surface's package name/scope + boot defaults,
 #      ONBOARDING.md, CLAUDE.md); every operational file stays byte-identical
 #      so a later `git merge template/main` never conflicts on plumbing;
-#   4. clones ../memql (at --engine-ref) and ../memql-cockpit (at --cockpit-ref)
-#      as SIBLINGS in the PARENT directory (the workspace);
+#   4. clones ../memql at --engine-ref in the PARENT workspace; Cockpit is
+#      the cockpit/ module in that same checkout (validated before stamping);
 #   5. prunes template-only artifacts (.template/memql-package.yaml, product.env.example) and
 #      replaces the template README with a product README stub.
 #
@@ -28,14 +28,13 @@ set -euo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/capability.sh"
 
-cap_init "product.init" "Stamp this template checkout in place into a concrete memQL product: write product.env, rename + substitute tokens, clone engine + cockpit siblings, prune template artifacts."
+cap_init "product.init" "Stamp this template checkout in place into a concrete memQL product: write product.env, rename + substitute tokens, clone the engine monorepo including Cockpit, prune template artifacts."
 cap_spec_param_required "product"     "product name (^[a-z][a-z0-9-]*$; e.g. 'acme')"
 cap_spec_param_required "product-org" "GitHub org/user owning this product repo (e.g. 'acme-io')"
 cap_spec_param "domain"       "the CLOUD (production) domain, stamped into the cloud overlay only; the local stack is always served at memql.<product>.localhost and never reads it (default: memql.localhost, a placeholder)"
 cap_spec_param "engine-ref"   "engine ref to pin (default: the latest engine release tag, resolved at stamp time; falls back to main with a loud warning when offline)"
 cap_spec_param "registry"     "container registry for the product bundle + client-surface images (default: empty = local-only)"
-cap_spec_param "cockpit-ref"  "cockpit ref to clone (default: main)"
-cap_spec_param "skip-clones"  "do not clone the engine/cockpit siblings (flag; for CI + offline runs)"
+cap_spec_param "skip-clones"  "do not clone or validate the engine monorepo (flag; for CI + offline runs)"
 cap_spec_param "dry-run"      "report the stamp plan without changing anything (flag)"
 
 #=============================================================================
@@ -43,9 +42,8 @@ cap_spec_param "dry-run"      "report the stamp plan without changing anything (
 #=============================================================================
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PARENT="$(cd "$ROOT/.." && pwd)"      # the workspace: engine + cockpit clone here
+PARENT="$(cd "$ROOT/.." && pwd)"      # the workspace: the engine monorepo clones here
 ENGINE_REPO="https://github.com/znasllc-io/memql.git"
-COCKPIT_REPO="https://github.com/znasllc-io/memql-cockpit.git"
 
 # Operational files init must NEVER touch (byte-identical template<->product, so
 # `git merge template/main` stays clean). Paths are relative to ROOT; a trailing
@@ -368,27 +366,52 @@ function substitute_tree() {
     cap_step "substituted tokens across template-owned paths"
 }
 
-# clone_sibling <url> <dir> <ref> -- idempotent sibling clone into PARENT.
-function clone_sibling() {
-    local url="$1" dir="$2" ref="$3" dest="$PARENT/$2"
-    if [[ -d "$dest/.git" ]]; then
-        cap_info "$dir/ already checked out at $dest; leaving as-is"
+# Acquire and validate the monorepo before writing any product files. Existing
+# checkouts (including worktrees) and legacy memql-cockpit siblings are preserved.
+function clone_engine() {
+    [[ -n "$SKIP_CLONES" ]] && { cap_info "--skip-clones: not cloning the engine monorepo"; return 0; }
+    local dest="$PARENT/memql" staging
+    if [[ -e "$dest/.git" ]]; then
+        [[ -f "$dest/cockpit/go.mod" ]] \
+            || cap_fail 3 "existing engine checkout at $dest has no cockpit/ module; keep its pin and use --skip-clones, or update that checkout explicitly to a revision containing Cockpit"
+        cap_info "memql/ already checked out at $dest; leaving as-is (Cockpit: $dest/cockpit)"
         return 0
     fi
-    cap_step "cloning $url -> $dest (ref: $ref)"
-    if git clone --branch "$ref" "$url" "$dest" 2>/dev/null; then
-        :
-    else
-        git clone "$url" "$dest"
-        git -C "$dest" checkout "$ref"
+    [[ ! -e "$dest" && ! -L "$dest" ]] || cap_fail 3 "$dest exists but is not a Git checkout; leaving it unchanged"
+    staging="$(mktemp -d "$PARENT/.memql-init.XXXXXX")" || cap_fail 5 "could not create an engine clone staging directory"
+    cap_step "cloning $ENGINE_REPO -> $dest (ref: $RESOLVED_ENGINE_REF; Cockpit: cockpit/)"
+    if ! git clone --branch "$RESOLVED_ENGINE_REF" "$ENGINE_REPO" "$staging/checkout" 2>/dev/null; then
+        rm -rf "$staging/checkout"
+        if ! git clone "$ENGINE_REPO" "$staging/checkout" \
+            || ! git -C "$staging/checkout" checkout "$RESOLVED_ENGINE_REF"; then
+            rm -rf "$staging"
+            cap_fail 5 "could not clone engine ref '$RESOLVED_ENGINE_REF'; product files are unchanged"
+        fi
+    fi
+    if [[ ! -f "$staging/checkout/cockpit/go.mod" ]]; then
+        rm -rf "$staging"
+        cap_fail 3 "engine ref '$RESOLVED_ENGINE_REF' has no cockpit/ module; keep the historical pin with --skip-clones, or select a monorepo revision containing Cockpit explicitly"
+    fi
+    # mkdir reserves the destination without clobbering a checkout that appeared
+    # while the clone ran. Plain mv could instead nest checkout/ inside it.
+    if ! mkdir "$dest"; then
+        rm -rf "$staging"
+        cap_fail 3 "$dest appeared while cloning; leaving it unchanged"
     fi
     cap_changed
-}
-
-function clone_siblings() {
-    [[ -n "$SKIP_CLONES" ]] && { cap_info "--skip-clones: not cloning engine/cockpit"; return 0; }
-    clone_sibling "$ENGINE_REPO"  "memql"         "$RESOLVED_ENGINE_REF"
-    clone_sibling "$COCKPIT_REPO" "memql-cockpit" "$COCKPIT_REF"
+    # Publish .git last so another init refuses a still-incomplete checkout.
+    if ! (
+        shopt -s dotglob
+        for entry in "$staging/checkout/"*; do
+            [[ "$entry" == "$staging/checkout/.git" ]] && continue
+            mv "$entry" "$dest/" || exit 1
+        done
+        mv "$staging/checkout/.git" "$dest/.git"
+    ); then
+        rm -rf "$staging"
+        cap_fail 5 "partial engine checkout left at $dest; product files are unchanged"
+    fi
+    rmdir "$staging/checkout" "$staging"
 }
 
 # replace_readme -- swap the template README (a guide to the template) for a
@@ -412,8 +435,8 @@ function replace_readme() {
         printf '  overlays (local / cloud) + the ArgoCD project/app manifests.\n'
         printf -- '- `product.env` -- product identity every operational file reads.\n\n'
         printf '## Local stack\n\n'
-        printf 'Requires the engine + cockpit checked out as siblings (`../memql`,\n'
-        printf '`../memql-cockpit`) plus docker, k3d, kubectl, mkcert.\n\n'
+        printf 'Requires the sibling engine checkout (`../memql`) plus docker, k3d, kubectl, mkcert.\n'
+        printf 'Cockpit source lives in `../memql/cockpit` on monorepo revisions.\n\n'
         printf '```bash\n'
         printf 'make up        # engine mesh + this product (bff + clients + DSL) on local k3d\n'
         printf 'make dev       # rebuild the DSL bundle and re-mount it on the bff\n'
@@ -500,7 +523,7 @@ function print_dry_run_plan() {
     if [[ -n "$SKIP_CLONES" ]]; then
         cap_info "would clone:  (skipped -- --skip-clones)"
     else
-        cap_info "would clone:  $ENGINE_REPO@$RESOLVED_ENGINE_REF -> $PARENT/memql, $COCKPIT_REPO@$COCKPIT_REF -> $PARENT/memql-cockpit"
+        cap_info "would clone:  $ENGINE_REPO@$RESOLVED_ENGINE_REF -> $PARENT/memql (includes cockpit/; validated before stamping)"
     fi
 }
 
@@ -533,7 +556,6 @@ function main() {
     DOMAIN="$(cap_param domain "memql.localhost")"
     ENGINE_REF="$(cap_param engine-ref "")"
     REGISTRY_VALUE="$(cap_param registry "")"
-    COCKPIT_REF="$(cap_param cockpit-ref "main")"
     SKIP_CLONES="$(cap_flag skip-clones)"
     DRY_RUN="$(cap_flag dry-run)"
 
@@ -567,15 +589,15 @@ function main() {
         cap_ok
     fi
 
+    clone_engine
     materialize_product_pipeline
     write_product_env
     rename_token_paths
     substitute_tree
     replace_readme
     prune_template_artifacts
-    clone_siblings
 
-    cap_info "product '$PRODUCT' stamped. Next: review the diff, commit, then 'make up' (engine + cockpit siblings + docker/k3d required)."
+    cap_info "product '$PRODUCT' stamped. Next: review the diff, commit, then 'make up' (engine checkout + docker/k3d required; Cockpit source: ../memql/cockpit)."
     emit_result
     cap_ok
 }
