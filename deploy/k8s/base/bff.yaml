@@ -58,27 +58,31 @@ spec:
                 matchLabelKeys:
                   - pod-template-hash
       # PREFER A SEPARATE HOST ACROSS ROLLOUTS TOO. The anti-affinity above and
-      # the spread below count this revision only, and BOTH matchLabelKeys LINES
-      # ARE REQUIRED. These are preferences, read only when a pod is scheduled,
-      # and nothing rebalances afterwards, so replicas can still share a host.
+      # the spread below both count this revision only. These are preferences,
+      # read only when a pod is scheduled, and nothing rebalances afterwards, so
+      # replicas can still share a host.
       #
-      # On the anti-affinity: without it, the term also counts the old revision
-      # and terminating pods, so during a rolling update the node a pair is
-      # leaving looks busier than the node the first new replica took. MEASURED
-      # with room on only two nodes: the pair moved together on every rollout.
-      # Scoping only the spread does not fix that. The two have equal default
-      # weight and cancel out, so the resource scores decide, and the pair still
-      # moved together when the two nodes' requests differed by less than about
-      # one replica's.
+      # The anti-affinity's matchLabelKeys is what separates a pair. Without it
+      # the term also counts the old revision and terminating pods, so during a
+      # rolling update the node a pair is leaving looks busier than the node the
+      # first new replica took. MEASURED with room on only two nodes: the pair
+      # moved together on every rollout. Scoping only the spread does not fix
+      # that: the two have equal default weight and cancel out, so the resource
+      # scores decide, and the pair still moved together when the two nodes'
+      # requests differed by less than about one replica's.
       #
-      # On the spread: any explicit entry replaces the scheduler's built-in
-      # spread, which counts one revision. MEASURED on an entry without it, with
-      # the anti-affinity unscoped: together in 2 of 8 multi-Deployment releases
-      # where the built-in spread kept them apart.
+      # This spread's matchLabelKeys adds margin, not a measured difference. With
+      # it the two preferences agree, worth 400 points against the 300 the
+      # resource and image scores can reach. Without it the entry scores both
+      # nodes the same for the second new replica. Any explicit entry also
+      # replaces the scheduler's built-in spread, including its zone preference.
       #
-      # MEASURED with both: apart from the first rollout on, at equal and uneven
-      # node load. At one replica nothing is counted, so the new pod goes where
-      # the resource scores send it, which can be the node the old one is leaving.
+      # MEASURED with the anti-affinity scoped, one Deployment rolling alone:
+      # apart from the first rollout on, at equal and uneven node load. Several
+      # rolling in the same second still pair replicas: 5 of 20 in a replay,
+      # against 6 of 20 without these lines. At one replica nothing is counted, so
+      # the new pod goes where the resource scores send it, which can be the node
+      # the old one is leaving.
       #
       # ScheduleAnyway, because a rolling update must never wait on placement:
       # DoNotSchedule stalled a rollout with one schedulable node.
