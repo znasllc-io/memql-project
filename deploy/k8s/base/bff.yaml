@@ -55,29 +55,30 @@ spec:
                 labelSelector:
                   matchLabels:
                     app.kubernetes.io/name: bff-__PRODUCT__
-      # PREFER A SEPARATE HOST ACROSS ROLLOUTS TOO. A preference, read only when
-      # a pod is scheduled, and nothing rebalances afterwards, so replicas can
-      # still share a host. At one replica, or with one schedulable node, it
-      # changes no placement.
+                matchLabelKeys:
+                  - pod-template-hash
+      # PREFER A SEPARATE HOST ACROSS ROLLOUTS TOO. The anti-affinity above and
+      # the spread below count this revision only, and BOTH matchLabelKeys LINES
+      # ARE REQUIRED. These are preferences, read only when a pod is scheduled,
+      # and nothing rebalances afterwards, so replicas can still share a host.
       #
-      # The anti-affinity above does not keep a pair apart once it is together:
-      # it also counts the old revision and terminating pods, so during a rolling
-      # update the node the pair is leaving looks busier than the node the first
-      # new replica took. MEASURED with room on only two nodes: the pair moved
-      # together on every rollout.
+      # On the anti-affinity: without it, the term also counts the old revision
+      # and terminating pods, so during a rolling update the node a pair is
+      # leaving looks busier than the node the first new replica took. MEASURED
+      # with room on only two nodes: the pair moved together on every rollout.
+      # Scoping only the spread does not fix that. The two have equal default
+      # weight and cancel out, so the resource scores decide, and the pair still
+      # moved together when the two nodes' requests differed by less than about
+      # one replica's.
       #
-      # matchLabelKeys IS REQUIRED. It makes this entry count this revision only,
-      # which is what pulls the second new replica the other way. Without it the
-      # pair stayed together in that replay, and the entry made some releases
-      # worse: any explicit entry replaces the scheduler's built-in spread, which
-      # counts one revision. MEASURED: together in 2 of 8 multi-Deployment
-      # releases where the built-in spread kept them apart.
+      # On the spread: any explicit entry replaces the scheduler's built-in
+      # spread, which counts one revision. MEASURED on an entry without it, with
+      # the anti-affinity unscoped: together in 2 of 8 multi-Deployment releases
+      # where the built-in spread kept them apart.
       #
-      # NODE LOAD STILL DECIDES. This entry and the anti-affinity have equal
-      # default weight and cancel out for that second replica, so the resource
-      # scores break the tie. MEASURED: apart within two rollouts when the two
-      # nodes' requests differ by about one replica's or more, and still together
-      # on every rollout when they differ by less.
+      # MEASURED with both: apart from the first rollout on, at equal and uneven
+      # node load. At one replica nothing is counted, so the new pod goes where
+      # the resource scores send it, which can be the node the old one is leaving.
       #
       # ScheduleAnyway, because a rolling update must never wait on placement:
       # DoNotSchedule stalled a rollout with one schedulable node.
