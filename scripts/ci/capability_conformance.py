@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Check every shell capability's non-executing metadata interface.
+"""Check every shell capability's non-executing metadata interface and how it
+reads its boolean params.
 
 Keep this runner and its tests identical in the template and stamped products.
 The script set is discovered; products may add capabilities without editing CI.
@@ -14,6 +15,18 @@ import sys
 
 
 SOURCE = re.compile(r"^\s*(?:source|\.)\s+[^\n]*\bcapability\.sh\b", re.MULTILINE)
+
+# Boolean reads. cap_flag returns the raw flag string and "false" is not empty,
+# so a boolean read through it and tested with -n took --force=false as true:
+# assemble-lockfile.sh overwrote an immutable lockfile. A boolean is read with
+# cap_bool. The engine's TestCapabilityScriptsReadBooleansWithCapBool holds its
+# own scripts to these two rules and three more about cap_bool_str, which no
+# script here uses.
+SPEC_PARAM = re.compile(r'cap_spec_param(?:_required)?[ \t]+"([^"]+)"[ \t]+"((?:[^"\\]|\\.)*)"')
+# A param is declared a flag when a parenthetical in its description names the
+# word: "(flag)", "(flag; for CI + offline runs)", "(immutability override; flag)".
+FLAG_MARKER = re.compile(r"\([^()]*\bflag\b[^()]*\)")
+PARAM_READ = re.compile(r'\b(cap_flag|cap_param|cap_bool_str|cap_bool)[ \t]+"?([A-Za-z0-9][A-Za-z0-9_-]*)"?')
 
 
 def discover(root):
@@ -41,10 +54,43 @@ def metadata(root, path, flag):
     return result.stdout
 
 
+def boolean_reads(text):
+    """Return (line, problem) for every boolean read that can fail open.
+
+    1. A param declared a flag is read only with cap_bool or cap_bool_str.
+    2. cap_flag only probes whether a VALUE param arrived as a flag, beside the
+       cap_param read that resolves it (init.sh's --domain); a cap_flag read
+       of a param nothing resolves is a boolean read, whatever its description
+       says. Full-line comments are not code.
+    """
+    declared = {m.group(1) for m in SPEC_PARAM.finditer(text) if FLAG_MARKER.search(m.group(2))}
+    reads, valued = [], set()
+    for number, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        for match in PARAM_READ.finditer(line):
+            reads.append((number, match.group(1), match.group(2)))
+            if match.group(1) == "cap_param":
+                valued.add(match.group(2))
+    problems = []
+    for number, reader, param in reads:
+        if param in declared and reader in ("cap_flag", "cap_param"):
+            problems.append((number, f"--{param} is declared a flag but read with {reader}, whose raw "
+                                     f"string makes --{param}=false read as true; use `if cap_bool {param}; then`"))
+        elif reader == "cap_flag" and param not in valued:
+            problems.append((number, f"cap_flag {param} reads a param no cap_param resolves, so it is a "
+                                     f"boolean read; use `if cap_bool {param}; then`"))
+    return problems
+
+
 def check(root):
     scripts = discover(root)
     for path in scripts:
         name = path.relative_to(root)
+        problems = boolean_reads(path.read_text())
+        if problems:
+            raise ValueError("\n".join(f"{name}:{line}: {problem}" for line, problem in problems))
         # json.loads rejects both stray logs and a second document on stdout.
         try:
             spec = json.loads(metadata(root, path, "--print-spec"))

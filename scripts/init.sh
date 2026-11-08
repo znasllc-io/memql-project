@@ -556,11 +556,15 @@ function main() {
     DOMAIN="$(cap_param domain "memql.localhost")"
     ENGINE_REF="$(cap_param engine-ref "")"
     REGISTRY_VALUE="$(cap_param registry "")"
-    SKIP_CLONES="$(cap_flag skip-clones)"
-    DRY_RUN="$(cap_flag dry-run)"
+    # Booleans are "" or "1", read with cap_bool: as emptiness tests of
+    # cap_flag, --dry-run=false was a dry run and --skip-clones=false skipped.
+    if cap_bool skip-clones; then SKIP_CLONES=1; else SKIP_CLONES=""; fi
+    if cap_bool dry-run; then DRY_RUN=1; else DRY_RUN=""; fi
 
     # Was the flag passed explicitly this run? (empty = not passed) -- drives the
     # B1 value-preservation rule (preserve product.env's value unless overridden).
+    # cap_flag is right for these: each is a presence probe for a VALUE param
+    # resolved by cap_param above, never a boolean.
     DOMAIN_FLAG="$(cap_flag domain)"
     ENGINE_REF_FLAG="$(cap_flag engine-ref)"
     REGISTRY_FLAG="$(cap_flag registry)"

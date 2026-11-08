@@ -114,7 +114,9 @@ function main() {
     local release overlay lf dry
     release="$(cap_param release "")"
     overlay="$(cap_param overlay "cloud")"
-    dry="$(cap_flag dry-run)"
+    # "" or "1", read with cap_bool: as an emptiness test of cap_flag,
+    # --dry-run=false was a dry run.
+    if cap_bool dry-run; then dry=1; else dry=""; fi
     cap_require release "$release"
     # The target is an overlay DIRECTORY NAME, never a path, and never `local`:
     # the local overlay pins mutable :local tags for k3d import, so there is no

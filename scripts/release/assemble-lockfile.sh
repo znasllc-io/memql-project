@@ -89,7 +89,9 @@ function main() {
     [ "${#surfaces[@]}" -gt 0 ] || cap_fail 2 "--client-digests parsed to zero surfaces: '$clients'"
 
     out="$(cap_param out "$REPO_ROOT/deploy/releases/$release.yaml")"
-    local force; force="$(cap_flag force)"
+    # "" or "1", read with cap_bool: as an emptiness test of cap_flag,
+    # --force=false OVERWROTE an immutable lockfile.
+    local force; if cap_bool force; then force=1; else force=""; fi
     mkdir -p "$(dirname "$out")"
 
     # Render into a tmp first so we can honor the IMMUTABILITY invariant: a

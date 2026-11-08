@@ -5,12 +5,12 @@
 #
 # VENDORED from znasllc-io/memql `scripts/lib/capability.sh` (the canonical
 # implementation; keep in sync manually when the engine's copy changes). Last
-# synced at engine e7945e4a6, the copy in which a run that exits 0 without
-# calling cap_ok became a failure; bare flags reading "true", cap_bool and
-# cap_progress arrived between that and the sync before. This copy is meant to
-# stay BYTE-IDENTICAL to the engine's below this header -- the engine's
-# scripts/lib/capability_contract_test.go is the gate that keeps the contract
-# honest, and a local divergence here is a divergence from that gate.
+# synced at engine 3195a4d9a, the copy that reads booleans only with cap_bool:
+# --params-stdin=false reads no stdin, and a refused cap_bool_str names its
+# value on stderr. Exit 0 without cap_ok became a failure in the sync before.
+# This copy is meant to stay BYTE-IDENTICAL to the engine's below this
+# header -- the engine's scripts/lib/capability_contract_test.go is the gate
+# that keeps the contract honest, and a divergence here diverges from it.
 #
 # Shared runtime for MemQL **capability scripts** -- the deterministic shell
 # backends that the DSL `action` executor (and humans) invoke. It is the
@@ -40,7 +40,7 @@
 #     cap_parse_flags "$@"          # --name=value / --name into CAP_ARG_*; undeclared flags exit 2
 #     local cluster purge
 #     cluster="$(cap_param cluster "${MEMQL_K3D_CLUSTER:-memql}")"
-#     purge="$(cap_flag purge)"
+#     if cap_bool purge; then purge=1; else purge=""; fi   # a boolean: cap_bool, never cap_flag
 #     ...
 #     cap_result_set    cluster "$cluster"
 #     cap_result_set_raw deleted true
@@ -317,11 +317,18 @@ function _cap_on_exit() {
 # _CAP_STDIN_JSON. Relying on the lazy call inside cap_param alone breaks
 # multi-param stdin resolution -- each $() subshell would re-run the capture
 # against an already-drained stdin (#2508).
+#
+# --params-stdin is a boolean like any other, so it is read with cap_bool: an
+# emptiness test took --params-stdin=false as an opt-in and read the stream.
+# cap_bool resolves it through cap_param, whose own call back into this
+# function returns at once (_CAP_STDIN_READ is already set) with nothing
+# buffered, so the flag decides and stdin JSON cannot vote on whether stdin is
+# read. A bad value is refused here, in cap_parse_flags, before any work.
 function _cap_load_stdin() {
     [[ "$_CAP_STDIN_READ" == "1" ]] && return
     _CAP_STDIN_READ=1
     local want="${CAP_PARAMS_STDIN:-}"
-    [[ -n "$(cap_flag params-stdin)" ]] && want=1
+    if cap_bool params-stdin; then want=1; fi
     if [[ -n "$want" ]]; then
         _CAP_STDIN_JSON="$(cat 2>/dev/null || true)"
     fi
@@ -330,7 +337,8 @@ function _cap_load_stdin() {
 # cap_param <name> [default]
 # Resolves a parameter from (in precedence order) a --name=value flag already
 # parsed into the global CAP_ARG_<NAME>, then stdin JSON, then the default.
-# Flags are populated by cap_parse_flags; for direct use, prefer cap_flag.
+# Flags are populated by cap_parse_flags. This is the reader for a VALUE; a
+# boolean goes through cap_bool, which interprets what this returns.
 function cap_param() {
     local name="$1" default="${2:-}" upper val
     upper="$(printf '%s' "$name" | tr '[:lower:]-' '[:upper:]_')"
@@ -428,8 +436,17 @@ function cap_parse_flags() {
     _cap_load_stdin
 }
 
-# cap_flag <name> -- returns the parsed flag value (or "" if unset). Requires
-# cap_parse_flags to have run.
+# cap_flag <name> -- returns the RAW parsed flag value (or "" if unset). Requires
+# cap_parse_flags to have run. It reads no stdin and interprets nothing, so it
+# answers one question: did a VALUE param arrive as a flag? (`--revision` given
+# explicitly, beside the cap_param read that resolves its value.)
+#
+# It is NOT a boolean reader. "false" is a non-empty string, so a boolean read
+# here and tested with -n took --apply=false as true: normalize-node-ids.sh
+# rewrote stored ids, down.sh purged, and --local=false passed the credential
+# scripts' gates on to kubectl, against whatever context it pointed at. Read a
+# boolean with cap_bool. TestCapabilityScriptsReadBooleansWithCapBool enforces
+# both rules.
 function cap_flag() {
     local upper var
     upper="$(printf '%s' "$1" | tr '[:lower:]-' '[:upper:]_')"
@@ -455,6 +472,16 @@ function cap_flag() {
 #
 # Usage:  if cap_bool dryRun; then ... fi
 #         cap_bool skipMonitoring "false" || install_monitoring
+#         if cap_bool purge; then purge=1; else purge=""; fi
+#
+# The last form keeps a flag in a variable that existing `-n` tests and
+# `${purge:+--purge}` pass-throughs read: "" or "1", never "false". It is the
+# safest way to hold one, because cap_bool runs in the script's own shell and
+# its refusal stops the script there (measured on bash 3.2.57 and 5.3.15).
+#
+# The refusal is ALSO written to stderr. Inside a command substitution, which
+# is where cap_bool_str runs, the envelope is captured with the output and the
+# caller sees only an abort; stderr is the stream that still names the value.
 function cap_bool() {
     local name="$1" default="${2:-false}" raw lower
     raw="$(cap_param "$name" "$default")"
@@ -462,7 +489,9 @@ function cap_bool() {
     case "$lower" in
         true|1|yes|y|on)     return 0 ;;
         ""|false|0|no|n|off) return 1 ;;
-        *) cap_fail 2 "--${name} takes a boolean (true/false); got '${raw}'" ;;
+        *)
+            cap_error "--${name} takes a boolean (true/false); got '${raw}'"
+            cap_fail 2 "--${name} takes a boolean (true/false); got '${raw}'" ;;
     esac
 }
 
@@ -479,6 +508,12 @@ function cap_bool() {
 # `[[ "$DRY_RUN" == "true" ]]` correct rather than accidental: the variable can
 # only ever hold one of two canonical values, so no comparison can miss. Prefer
 # `if cap_bool dryRun; then` when a branch is all that is wanted.
+#
+# Only a PLAIN assignment keeps the refusal: `local X="$(cap_bool_str ...)"`,
+# `export X=...`, `[[ "$(cap_bool_str ...)" == true ]]` and an argument
+# position all discard the substitution's exit 2, and a mistyped value then
+# reads as false (measured on bash 3.2.57 and 5.3.15). And because "false" is
+# non-empty, a cap_bool_str value is compared, never tested with -n or -z.
 function cap_bool_str() {
     if cap_bool "$1" "${2:-false}"; then printf 'true'; else printf 'false'; fi
 }

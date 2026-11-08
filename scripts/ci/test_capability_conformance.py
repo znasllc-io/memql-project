@@ -75,6 +75,35 @@ class ConformanceTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "product.init"):
             self.run_check()
 
+    def read_flags(self, body):
+        # A function nothing calls: the scan reads text, and --print-spec
+        # must still answer from the fixture runtime, which defines nothing.
+        path = self.script("release/assemble.sh", {"capability": "product.assemble", "params": []})
+        path.write_text(path.read_text() + "function never_run() {\n" + body + "\n}\n")
+
+    def test_a_declared_flag_read_with_cap_flag_or_cap_param_fails(self):
+        for reader in ('cap_flag force', 'cap_param force ""'):
+            with self.subTest(reader=reader):
+                self.read_flags('cap_spec_param "force" "overwrite a lockfile (immutability override; flag)"\n'
+                                f'force="$({reader})"')
+                with self.assertRaisesRegex(ValueError, r"release/assemble.sh:\d+: --force is declared a flag"):
+                    self.run_check()
+
+    def test_an_undeclared_boolean_read_with_cap_flag_fails(self):
+        self.read_flags('cap_spec_param "apply" "perform the change (default: check only)"\n'
+                        'APPLY="$(cap_flag apply)"')
+        with self.assertRaisesRegex(ValueError, "cap_flag apply reads a param no cap_param resolves"):
+            self.run_check()
+
+    def test_cap_bool_and_a_value_probe_pass(self):
+        self.read_flags('cap_spec_param "force" "overwrite (flag)"\n'
+                        'cap_spec_param "domain" "the domain"\n'
+                        'if cap_bool force; then force=1; else force=""; fi\n'
+                        'DOMAIN="$(cap_param domain "memql.localhost")"\n'
+                        'DOMAIN_FLAG="$(cap_flag domain)"\n'
+                        '# force="$(cap_flag force)" in a comment is not a read')
+        self.assertEqual(self.run_check(), 2)
+
 
 if __name__ == "__main__":
     unittest.main()
