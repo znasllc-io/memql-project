@@ -5,13 +5,14 @@
 #
 # VENDORED from znasllc-io/memql `scripts/lib/capability.sh` (the canonical
 # implementation; keep in sync manually when the engine's copy changes). Last
-# synced against engine main at the memql#2508 unknown-flag rejection + the
-# memql#3568 cap_spec_param_required additions. This copy is meant to stay
-# BYTE-IDENTICAL to the engine's below this header -- the engine's
+# synced at engine e7945e4a6, the copy in which a run that exits 0 without
+# calling cap_ok became a failure; bare flags reading "true", cap_bool and
+# cap_progress arrived between that and the sync before. This copy is meant to
+# stay BYTE-IDENTICAL to the engine's below this header -- the engine's
 # scripts/lib/capability_contract_test.go is the gate that keeps the contract
 # honest, and a local divergence here is a divergence from that gate.
 #
-# Shared runtime for memQL **capability scripts** -- the deterministic shell
+# Shared runtime for MemQL **capability scripts** -- the deterministic shell
 # backends that the DSL `action` executor (and humans) invoke. It is the
 # mechanism that makes the capability-script contract real and uniform:
 #
@@ -49,7 +50,9 @@
 #   main "$@"
 #
 # Anything sourcing this file inherits a `trap` that guarantees exactly one
-# JSON envelope is written to stdout, even on an unexpected `set -e` abort.
+# JSON envelope is written to stdout, even on an unexpected `set -e` abort,
+# and that a run which ends without calling cap_ok is reported as a failure,
+# never as a silent exit 0.
 
 # Guard against double-sourcing.
 if [[ -n "${_CAP_LIB_LOADED:-}" ]]; then
@@ -64,6 +67,7 @@ _CAP_LIB_LOADED=1
 _CAP_NAME=""            # capability id, e.g. "k3d.down"
 _CAP_SUMMARY=""         # one-line human summary
 _CAP_EMITTED=0          # 1 once a result envelope has been written
+_CAP_IS_MAIN=1          # 0 when a shell sourced the script instead of running it
 _CAP_CHANGED=false      # idempotency signal: did this run mutate anything
 _CAP_RESULT_FIELDS=()   # accumulated "key":<json-value> pairs for result{}
 _CAP_SPEC_PARAMS=()     # "name|description" for --print-spec
@@ -79,9 +83,19 @@ _CAP_STDIN_READ=0
 # the CAP_PARAMS_STDIN env opt-in is set, stdin params are buffered here, in
 # the PARENT shell, so later "$(cap_param ...)" subshells all read the same
 # captured JSON instead of each draining stdin (#2508).
+#
+# It also records whether the capability IS the program bash is running: the
+# file that called cap_init is $0 (or empty, for code read from stdin or -c).
+# A shell that only sourced the script -- a test harness exercising its
+# functions -- is not the capability, and _cap_on_exit leaves its exit 0 alone.
 function cap_init() {
     _CAP_NAME="${1:?cap_init requires a capability id}"
     _CAP_SUMMARY="${2:-}"
+    if [[ -z "${BASH_SOURCE[1]:-}" || "${BASH_SOURCE[1]}" == "$0" ]]; then
+        _CAP_IS_MAIN=1
+    else
+        _CAP_IS_MAIN=0
+    fi
     if [[ -n "${CAP_PARAMS_STDIN:-}" ]]; then
         _cap_load_stdin
     fi
@@ -129,6 +143,36 @@ function cap_info()  { printf 'INFO:  %s\n' "$*" >&2; }
 function cap_warn()  { printf 'WARN:  %s\n' "$*" >&2; }
 function cap_error() { printf 'ERROR: %s\n' "$*" >&2; }
 function cap_step()  { printf '==> %s\n'    "$*" >&2; }
+
+# cap_progress <label> [<done> <total>]
+# Reports where a long step has got to, as exactly one STDERR line:
+#
+#   ::memql-progress:: <done>/<total> <label>     (with a count)
+#   ::memql-progress:: - <label>                  (without one)
+#
+# A caller that runs this script (the editor's install runner) reads the line
+# as the step's current phase -- "Starting services 5 of 9" under a progress
+# bar -- and keeps it OUT of the step's log; a human at a terminal just sees
+# the line. <label> is short, sentence case, in the operator's words. <done>
+# and <total> are whole numbers counting THIS phase's own units (services,
+# images), not the whole step; pass both or neither.
+#
+# Reporting progress must never be able to fail a capability, so a malformed
+# count is dropped (the label is still reported) rather than refused. A count
+# with leading zeros is read as decimal (10#): bash would otherwise take "08"
+# for a bad octal number and print its own error into the step's log.
+function cap_progress() {
+    local label="${1:-}" count_done="${2:-}" count_total="${3:-}"
+    label="${label//$'\n'/ }"
+    label="${label//$'\r'/ }"
+    [[ -n "$label" ]] || return 0
+    if [[ "$count_done" =~ ^[0-9]{1,9}$ && "$count_total" =~ ^[0-9]{1,9}$ ]] \
+        && (( 10#$count_total > 0 )); then
+        printf '::memql-progress:: %d/%d %s\n' "$((10#$count_done))" "$((10#$count_total))" "$label" >&2
+    else
+        printf '::memql-progress:: - %s\n' "$label" >&2
+    fi
+}
 
 #=============================================================================
 # JSON HELPERS (pure bash -- no jq dependency for emission)
@@ -216,15 +260,42 @@ function _cap_emit_raw_result() {
     _CAP_EMITTED=1
 }
 
-# _cap_on_exit -- EXIT trap: guarantees a failure envelope if the script
-# aborts (set -e / uncaught error) without explicitly emitting one. Success
-# paths MUST call cap_ok; the conformance test enforces that.
+# _cap_on_exit -- EXIT trap: guarantees that a script which never emitted its
+# own envelope still ends with exactly one, and that it reports a failure.
+#
+#   - A non-zero exit (a set -e abort, an uncaught error) is reported with
+#     that code.
+#   - An exit of 0 is NOT a success. Success paths MUST call cap_ok, so a
+#     zero with no envelope means the script never got as far as saying it
+#     succeeded. It is reported as a failure and the exit is forced to 1, the
+#     contract's code for an unexpected failure. This binds the capability's
+#     own process only: a shell that sourced the script to exercise its
+#     functions (see cap_init) keeps its exit 0.
+#
+# The second case is not hypothetical. Under set -e, stock macOS bash 3.2
+# ends a script that hits a fatal expansion error -- an unbound variable, a
+# bad substitution such as ${x,,} -- with the status of the last command that
+# ran, almost always 0, where bash 4+ exits 1. Trusting that 0 made those
+# deaths report nothing at all.
+#
+# _cap_on_exit reads the status from $?, so a trap that composes it with
+# cleanup must hand it the script's own status: capture $? first, turn errexit
+# off, and restore it with `(exit "$rc")` right before the call, as
+# _install_on_exit in scripts/install/install-binary.sh does. And because it
+# may exit, nothing placed after it in a handler is sure to run.
 function _cap_on_exit() {
     local code=$?
     [[ "$_CAP_EMITTED" == "1" ]] && return
     if [[ $code -ne 0 ]]; then
         _cap_emit "false" "$code" "capability '${_CAP_NAME}' aborted (exit ${code}) without an explicit result"
+        return
     fi
+    [[ "$_CAP_IS_MAIN" == "1" ]] || return 0
+    # set -e still holds inside a trap, and when it fires there it abandons
+    # the handler WITHOUT changing the exit status, so the exit below must
+    # not depend on the emit succeeding.
+    _cap_emit "false" 1 "capability '${_CAP_NAME}' ended (exit 0) without an explicit result, which is not a success: no cap_ok or cap_fail ran (bash 3.2 also exits 0 when an unbound variable or a bad substitution kills a script; stderr names it)" || true
+    exit 1
 }
 
 #=============================================================================
@@ -317,7 +388,7 @@ function _cap_declared_params_list() {
     printf '%s' "${out:-<none>}"
 }
 
-# cap_parse_flags "$@" -- parses --name=value and --name (bare -> "1") into
+# cap_parse_flags "$@" -- parses --name=value and --name (bare -> "true") into
 # CAP_ARG_<NAME> globals. --help / --print-spec are handled by cap_handle_meta.
 # Unknown flags are rejected (exit 2) to keep the param surface honest: a flag
 # is known only when the script declared it via cap_spec_param (or it is one
@@ -344,7 +415,12 @@ function cap_parse_flags() {
                     cap_fail 2 "unknown flag: --${name} (declared params: $(_cap_declared_params_list))"
                 fi
                 upper="$(printf '%s' "$name" | tr '[:lower:]-' '[:upper:]_')"
-                printf -v "CAP_ARG_${upper}" '%s' "1"
+                # A bare flag resolves to "true", NOT "1" (#4629/#4631). It used
+                # to be "1" while every consumer compared against "true", so
+                # `--dryRun` skipped the guard and ran the destructive branch --
+                # a safety flag failing OPEN, which is the one direction it must
+                # never fail. Read booleans with cap_bool, never by comparison.
+                printf -v "CAP_ARG_${upper}" '%s' "true"
                 shift ;;
             *) cap_fail 2 "unexpected positional argument: $1" ;;
         esac
@@ -359,6 +435,52 @@ function cap_flag() {
     upper="$(printf '%s' "$1" | tr '[:lower:]-' '[:upper:]_')"
     var="CAP_ARG_${upper}"
     printf '%s' "${!var:-}"
+}
+
+# cap_bool <name> [default] -- resolves a BOOLEAN param. This is the only
+# sanctioned way to read one; a hand-rolled comparison is what made a bare
+# --dryRun fail open (#4629), because the parser and the consumer disagreed on
+# the spelling of true.
+#
+# Returns 0 (shell true) for the bare flag, "true", "1", "yes", "y" or "on";
+# returns 1 (shell false) for "", "false", "0", "no", "n" or "off". Matching is
+# case-insensitive. "1" stays truthy so a scripted caller outside this tree
+# that still passes --dryRun=1 keeps working.
+#
+# Anything else is REFUSED with exit 2. cap_bool cannot know a flag's polarity
+# -- --dryRun is safe when true, --purgeKeyVault is safe when false -- so there
+# is no default it could pick for a typo that fails closed in both directions.
+# Refusing is the only answer that is safe whichever branch is the dangerous
+# one, and it turns `--dryRun=ture` into an error instead of a live deploy.
+#
+# Usage:  if cap_bool dryRun; then ... fi
+#         cap_bool skipMonitoring "false" || install_monitoring
+function cap_bool() {
+    local name="$1" default="${2:-false}" raw lower
+    raw="$(cap_param "$name" "$default")"
+    lower="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
+    case "$lower" in
+        true|1|yes|y|on)     return 0 ;;
+        ""|false|0|no|n|off) return 1 ;;
+        *) cap_fail 2 "--${name} takes a boolean (true/false); got '${raw}'" ;;
+    esac
+}
+
+# cap_bool_str <name> [default] -- the VALUE form of cap_bool: prints exactly
+# "true" or "false", never any other spelling, and refuses a non-boolean with
+# exit 2 the same way.
+#
+# Use it where a boolean is needed as a string rather than as a branch -- a
+# compound condition, or a field in the result envelope:
+#
+#     DRY_RUN="$(cap_bool_str dryRun false)"
+#
+# Assigning through this instead of cap_param is what makes an existing
+# `[[ "$DRY_RUN" == "true" ]]` correct rather than accidental: the variable can
+# only ever hold one of two canonical values, so no comparison can miss. Prefer
+# `if cap_bool dryRun; then` when a branch is all that is wanted.
+function cap_bool_str() {
+    if cap_bool "$1" "${2:-false}"; then printf 'true'; else printf 'false'; fi
 }
 
 # cap_require <name> <value> -- fails (exit 2) when a required param is empty.
