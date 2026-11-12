@@ -9,6 +9,16 @@
 // ownerUserId == actor.userId; a write path stamps it from actor.userId. The
 // field models an authz-sane concept, not just an empty schema.
 //
+// Account: a greeting belongs to the account its author was working in when
+// they made it (@belongsTo(account)). The engine fills accountId in at insert
+// and keeps it from then on; __PRODUCT_CAMEL__CreateGreeting does not take it.
+// It records, and opens the row to nobody. Every concept added to this file
+// declares a @belongsTo of its own, saying which account its rows belong to or
+// that they belong to none: the engine's docs/public/language/memql.md, "Which
+// account a row belongs to", lists the forms. Engine 0.31.35 is the first that
+// knows the annotation and an older one refuses it, so a product pinned below
+// that moves its ENGINE_REF first.
+//
 // The concept id assembles from @version + the domain namespace + the
 // name into v1:__PRODUCT_ID__:greeting. The namespace uses __PRODUCT_ID__ (the
 // identifier-safe product form, hyphens -> underscores): the engine's namespace
@@ -24,7 +34,9 @@
 @version("1.0.0")
 @description("A starter greeting record contributed by the __PRODUCT__ pack. Demonstrates that a pack's embedded .memql concept lands in the engine's concept registry alongside the core domains. Replace with the product's own concepts.")
 @displayCard(primary="message", secondary="ownerUserId", tertiary="createdAt")
+@belongsTo(account)
 concept greeting {
   ownerUserId  string  @required  @description("v1:identity:user.id of the owner. Per-row authz key (owned tier); stamped from actor.userId by the writing mutation.")
   message      string  @required  @description("The greeting text, e.g. \"hello from the __PRODUCT__ pack\".")
+  accountId    string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 }
