@@ -45,7 +45,7 @@ kind the doc forbids. Write **pack**.
   bare-ids contract enforced by ESLint. See `clients/README.md` for the
   convention and `clients/web/CLAUDE.md` for the surface.
 - `deploy/` -- `Dockerfile.bundle` (the data-only DSL-bundle image) +
-  `k8s/{base,components/dsl-bundle,overlays/{local,cloud}}` (the base carries
+  `k8s/{base,components/{dsl-mount,dsl-bundle},overlays/{local,cloud}}` (the base carries
   one `clients-<name>.yaml` per surface; `local` and `cloud` are the two deploy
   TARGETS of ONE installation shape -- no staging/prod dimension, a second
   environment is a second instance; engine epic memql#3943) +
@@ -58,8 +58,9 @@ kind the doc forbids. Write **pack**.
 
 The engine ships every node type as a **product-agnostic image**. This product's
 DSL reaches the engine **at runtime**: `deploy/Dockerfile.bundle` packages
-`dsl/` as a tiny data-only image; the vendored `deploy/k8s/components/dsl-bundle`
-kustomize component runs it as an init-container that copies the tree into a
+`dsl/` as a tiny data-only image; the vendored `deploy/k8s/components/dsl-mount` (shared volume, mount and
+`MEMQL_DSL_PATH`, applied once, listed first) and `dsl-bundle` kustomize
+components run it as an init-container that copies the tree into a
 shared volume the product's bff head reads at `MEMQL_DSL_PATH`
 (`dsl.MountRuntimeDomainsFromEnv`). The product's bff (`bff-__PRODUCT__`,
 labelled `memql/product-dsl=true`) is a plain engine `bff` node -- a deploy

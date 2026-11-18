@@ -36,8 +36,9 @@ a pre-existing `memql-cockpit/` sibling.
 Two mechanisms, both requiring **zero engine edits**:
 
 1. **Runtime DSL delivery.** `deploy/Dockerfile.bundle` packages `dsl/` as a tiny
-   data-only image. The vendored `deploy/k8s/components/dsl-bundle` kustomize
-   component runs it as an init-container that copies the `.memql` tree into a
+   data-only image. The vendored `deploy/k8s/components/dsl-mount` component (listed first, applied
+   once) owns the shared volume, the mount and `MEMQL_DSL_PATH`; the vendored
+   `dsl-bundle` component adds the init-container that copies the `.memql` tree into that
    shared volume the product's bff head reads at `MEMQL_DSL_PATH`. A plain engine
    `bff` image then loads the product DSL with no compiled-in product code
    (`dsl.MountRuntimeDomainsFromEnv`).

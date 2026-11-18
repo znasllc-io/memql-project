@@ -1,7 +1,7 @@
 # __PRODUCT__ LOCAL overlay -- the product Application (`__PRODUCT__-local`) for
 # the local k3d stack. It owns ONLY product resources: the bff head + every
 # client surface (../../base), the runtime DSL-bundle delivery (the vendored
-# dsl-bundle component), and the traefik front door. The engine mesh is the SEPARATE
+# dsl-mount + dsl-bundle components), and the traefik front door. The engine mesh is the SEPARATE
 # `memql-local` Application registered by `make -C ../memql up`.
 #
 # Local image discipline (mirrors the engine's local overlay): mutable `:local`
@@ -17,7 +17,12 @@ resources:
   - ../../base
   - front-door.yaml
 
+# ORDER MATTERS: dsl-mount owns the volume, mount and MEMQL_DSL_PATH and
+# creates the init-container list; dsl-bundle appends its init container to it.
+# The memql/product-dsl label is on bff.yaml in ../../base, which is how the
+# selector sees it (a labels: block here would run after the components).
 components:
+  - ../../components/dsl-mount
   - ../../components/dsl-bundle
 
 images:

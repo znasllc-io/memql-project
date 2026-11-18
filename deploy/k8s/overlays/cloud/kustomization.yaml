@@ -1,7 +1,7 @@
 # __PRODUCT__ CLOUD overlay -- the product Application reconciled by
 # deploy/argocd/apps/__PRODUCT__-cloud.yaml. It owns ONLY product resources:
 # the bff head + client surfaces (../../base), the runtime DSL bundle (vendored
-# dsl-bundle component), and the public nginx/cert-manager entry. The engine
+# dsl-mount + dsl-bundle components), and the public nginx/cert-manager entry. The engine
 # mesh (identity/mcp/agent/planner/workbench + the neutral bff)
 # is the SEPARATE engine Application (two Applications, not a kustomize remote
 # base; see downstream-stacks.md).
@@ -60,7 +60,12 @@ resources:
   - ../../base
   - public-entry.yaml
 
+# ORDER MATTERS: dsl-mount owns the volume, mount and MEMQL_DSL_PATH and
+# creates the init-container list; dsl-bundle appends its init container to it.
+# The memql/product-dsl label is on bff.yaml in ../../base, which is how the
+# selector sees it (a labels: block here would run after the components).
 components:
+  - ../../components/dsl-mount
   - ../../components/dsl-bundle
 
 # Issuer + CORS patch point (B2): the cloud instance serves identity and the SPA

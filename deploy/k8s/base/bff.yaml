@@ -5,8 +5,11 @@
 # bundle at runtime. Two things make it the product bff and not the engine's
 # neutral one:
 #   1. label `memql/product-dsl: "true"` -- opts this Deployment into the
-#      vendored dsl-bundle component, which adds the init-container that copies
-#      the product's .memql tree to MEMQL_DSL_PATH; the plain engine image then
+#      vendored dsl-mount + dsl-bundle components (dsl-mount: shared volume, mount
+#      and MEMQL_DSL_PATH; dsl-bundle: the init-container that copies the
+#      product's .memql tree into it). The label is set HERE, in the base the
+#      overlays consume, because components select on it before any labels:
+#      block in the same kustomization would run; the plain engine image then
 #      loads the product DSL with zero compiled-in product code.
 #   2. a distinct name/Service `bff-__PRODUCT__` -- so it coexists as a peer with
 #      the engine Application's neutral `bff` in the shared `memql` namespace
@@ -15,7 +18,7 @@
 #      deploy/k8s/components/engine-bff/bff.yaml header).
 #
 # NO product code, NO product-specific engine image, NO pre-existing
-# initContainers (the dsl-bundle component sets that array wholesale).
+# initContainers (the dsl-mount component creates that list and dsl-bundle appends to it).
 # imagePullPolicy/replicas and the image pin are set by the overlays.
 apiVersion: apps/v1
 kind: Deployment

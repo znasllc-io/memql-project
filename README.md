@@ -146,14 +146,14 @@ grammar
 stamp pins whichever is newest at the time you run it.
 
 > **TAGS, NOT GITHUB RELEASES -- and do not "fix" this.** The two have drifted
-> far apart on the engine: at the time of writing the newest tag is `v0.19.6`
-> while `GET /repos/znasllc-io/memql/releases/latest` still answers `v0.15.0`
-> (the engine's own `VERSION` file says `0.15.0` too). Nothing in this template
-> reads the Releases API, and that is deliberate -- swapping `git ls-remote
-> --tags` for `gh release view` or `/releases/latest` would silently pin an
-> engine four minor versions behind, and the stamp would look entirely healthy
-> while doing it. Publishing Releases for the newer tags is the engine's call,
-> not this template's.
+> apart on the engine before (a past stamp saw tag `v0.19.6` while
+> `/releases/latest` still answered `v0.15.0`). At the time of writing they
+> agree: the newest tag and the latest Release are both `v0.31.39`. Nothing in
+> this template reads the Releases API, and that is deliberate -- swapping
+> `git ls-remote --tags` for `gh release view` or `/releases/latest` would
+> silently pin an older engine whenever the two drift again, and the stamp
+> would look entirely healthy while doing it. Publishing Releases for the
+> newer tags is the engine's call, not this template's.
 
 - Pass `--engine-ref=<tag>` to pin a specific ref instead.
 - Offline, resolution falls back to `main` with a loud warning; the stamp then

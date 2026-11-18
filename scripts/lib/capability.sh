@@ -5,7 +5,8 @@
 #
 # VENDORED from znasllc-io/memql `scripts/lib/capability.sh` (the canonical
 # implementation; keep in sync manually when the engine's copy changes). Last
-# synced at engine 3195a4d9a, the copy that reads booleans only with cap_bool:
+# synced at engine v0.31.39 (body verified byte-identical to that tag's copy;
+# it reads booleans only with cap_bool, as it did at 3195a4d9a):
 # --params-stdin=false reads no stdin, and a refused cap_bool_str names its
 # value on stderr. Exit 0 without cap_ok became a failure in the sync before.
 # This copy is meant to stay BYTE-IDENTICAL to the engine's below this

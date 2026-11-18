@@ -4,7 +4,7 @@
 # the engine mesh (identity/agent/planner/workbench/mcp + the
 # neutral bff) is a SEPARATE ArgoCD Application from the engine repo (two
 # Applications, not a kustomize remote base; see downstream-stacks.md). The
-# dsl-bundle component and the per-environment ingress + image pins live in the
+# dsl-mount + dsl-bundle components and the per-environment ingress + image pins live in the
 # overlays.
 #
 # CLIENT SURFACES ARE PLURAL (clients/README.md). Each `clients/<name>/`
