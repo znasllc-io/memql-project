@@ -52,6 +52,13 @@ an earlier failure and cannot clear that failure.
 
 ## Local validation
 
+`python3 -m unittest discover -s scripts/ci -p 'test_optional_dsl.py'`
+executes the shipped product DSL recipe with isolated engine-fetch and lint
+substitutes. It verifies that a client-only root skips both operations, missing
+or misplaced DSL still fails, and every domain retains the full-root lint gate
+and its failure status. Retain `dsl/README.md` when removing the starter domain
+so the legacy bundle image can still copy `dsl/`.
+
 `python3 -m unittest discover -s scripts/ci -p 'test_pipeline_stamping.py'`
 proves first-stamp replacement, identifier substitution, consumed-artifact
 removal, no mutation in a dry run, preservation of owner policy on repeat

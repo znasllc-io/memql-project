@@ -25,6 +25,12 @@ pipeline:
         set -eu
         python3 -m unittest discover -s scripts/ci -p test_product_images.py
         python3 scripts/ci/product-images.py --manifest memql-package.yaml
+    - name: optional-dsl
+      placement: cluster
+      timeout: 5m
+      cpuMilli: 250
+      memoryMiB: 512
+      run: python3 -m unittest discover -s scripts/ci -p test_optional_dsl.py -v
     - name: maintenance-contracts
       placement: cluster
       timeout: 5m
@@ -241,6 +247,24 @@ pipeline:
         export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_TERMINAL_PROMPT=0
         export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$PWD"
 
+        # A client-only product keeps dsl/ (for the bundle image), but need
+        # not ship a domain. Reject misplaced DSL rather than quietly skipping
+        # it. Once any domain exists, keep the full engine-parity lint gate.
+        dsl_root="$PWD/dsl"
+        [ -d "$dsl_root" ] && [ ! -L "$dsl_root" ] || { echo "dsl/ must be a regular directory" >&2; exit 1; }
+        if [ -n "$(find "$dsl_root" -mindepth 1 -maxdepth 1 -type l -print -quit)" ]; then
+          echo "symlinks are not allowed directly under dsl/" >&2
+          exit 1
+        fi
+        if [ -n "$(find "$dsl_root" -maxdepth 1 -type f \( -name '*.memql' -o -name memql.toml -o -name namespace.pin \) -print -quit)" ]; then
+          echo "DSL files belong in dsl/<domain>/, not directly in dsl/" >&2
+          exit 1
+        fi
+        if [ -z "$(find "$dsl_root" -mindepth 1 -maxdepth 1 -type d -print -quit)" ]; then
+          echo "No product DSL domains; client-only package."
+          exit 0
+        fi
+
         # clone the engine at the pinned/default ref (for memqllint)
         (
         set -euo pipefail
@@ -262,16 +286,7 @@ pipeline:
         # memqllint the product DSL root (engine-parity tier)
         (
         set -euo pipefail
-        dsl_root="$PWD/dsl"
-        # Capture the product path before cd'ing into the engine clone.
-        [ -d "$dsl_root" ] || { echo "no dsl/ root found" >&2; exit 1; }
-        # At least one domain must exist under dsl/, else the parity overlay
-        # mounts nothing and passes trivially -- the exact vacuous-gate this
-        # lane is meant to prevent.
-        if [ -z "$(find "$dsl_root" -mindepth 1 -maxdepth 1 -type d -print -quit)" ]; then
-          echo "no dsl/<domain> dir under $dsl_root" >&2
-          exit 1
-        fi
+        # dsl_root was captured before entering the engine clone.
         echo "linting DSL root: $dsl_root"
         cd /tmp/memql
         go run ./cmd/memqllint "$dsl_root"

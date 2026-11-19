@@ -73,6 +73,11 @@ the bff head + every client surface + front door + DSL bundle. See
 
 ## Authoring DSL
 
+A client-only product may remove the starter domain and keep `dsl/README.md`.
+The pipeline then skips DSL linting; the legacy bundle still builds, and
+Deployables discovers no product domains. Do not keep sample DSL merely to
+make the pipeline pass. See `dsl/README.md` for the directory contract.
+
 Edit `.memql` files under `dsl/__PRODUCT_ID__/`. A pure-DSL pack can model concepts,
 read/write them (queries/mutations), react to graph events (automations calling
 logic/mutations), and expose agent tools -- all with ZERO product Go. The

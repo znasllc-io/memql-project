@@ -129,6 +129,11 @@ section.
 
 ## The DSL (the whole product surface)
 
+A client-only product may remove the starter domain and keep `dsl/README.md`.
+The pipeline then skips DSL linting; the legacy bundle still builds, and
+Deployables discovers no product domains. Do not keep sample DSL merely to
+make the pipeline pass. See `dsl/README.md` for the directory contract.
+
 `dsl/__PRODUCT_ID__/` holds `concepts` / `queries` / `mutations` / `shapes` /
 `tools` / `automations` / `logic`. A **pure-DSL pack** (no product Go) can:
 
