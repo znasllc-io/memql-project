@@ -71,8 +71,8 @@ sys.exit(int(args["--exit-code"]) if fault in ("findings", "disagreement", "outs
     def git(self, *args):
         return subprocess.check_output(["git", "-C", str(self.repo), *args], text=True).strip()
 
-    def run_scan(self, jobs=1):
-        return history.scan(self.repo, self.head, self.output, self.config, str(self.scanner), 1, 20, jobs)
+    def run_scan(self, jobs=1, timeout=20):
+        return history.scan(self.repo, self.head, self.output, self.config, str(self.scanner), 1, timeout, jobs)
 
     def test_complete_inventory_includes_root_and_tag_only_ancestry(self):
         result = self.run_scan()
@@ -254,9 +254,11 @@ sys.exit(int(args["--exit-code"]) if fault in ("findings", "disagreement", "outs
             log.write("scanner completed\n")
             return 0
 
+        # This checks artifact count and integrity, not disk performance. Leave room
+        # for 1,200 archive entries and 600 receipt writes on a contended CI volume.
         with patch.object(history, "git", inventory), patch.object(history, "run_scanner", clean_report):
-            result = self.run_scan(jobs=4)
-        self.assertEqual(result["status"], "clean")
+            result = self.run_scan(jobs=4, timeout=120)
+        self.assertEqual(result["status"], "clean", result)
         self.assertEqual(result["completedCommits"], len(commits))
         self.assertLess(len(list(self.output.iterdir())), 10)
         with tarfile.open(self.output / "batches.tar") as archive:
